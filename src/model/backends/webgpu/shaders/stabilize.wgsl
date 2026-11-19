@@ -11,8 +11,6 @@ struct Params {
     div_scale: f32,
     step_x   : u32,
     step_y   : u32,
-    t_chg    : f32,
-    chg_scale: f32,
 }
 
 @group(0) @binding(0) var<storage, read>       flow_buf     : array<vec4<f32>>;
@@ -43,11 +41,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let g_mag = clamp((env - params.t_lo) / max(params.t_hi - params.t_lo, 1e-3), 0.0, 1.0);
     let g_div = clamp((divg - params.t_div) / max(params.div_scale, 1e-3), 0.0, 1.0);
+    let g = max(max(g_mag, g_div), params.leak);
+
     let pred = pred_buf[idx].x;
     let refv = ref_buf[idx].x;
-    // Change gate (off when chg_scale is 0): trust the fresh matte where it disagrees with the warped history.
-    let g_chg = select(0.0, clamp((abs(pred - refv) - params.t_chg) / max(params.chg_scale, 1e-3), 0.0, 1.0), params.chg_scale > 0.0);
-    let g = max(max(max(g_mag, g_div), g_chg), params.leak);
     let stab = g * pred + (1.0 - g) * refv;
 
     output_buf[idx] = vec4<f32>(stab, env, 0.0, 0.0);

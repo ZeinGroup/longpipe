@@ -2,6 +2,7 @@ import type { Tensor, MLBuffer, StabilizeParams } from '~/model/backend.ts'
 import type { WebGLBackend } from '~/model/backends/webgl/index.ts'
 import { WebGLTensor, WebGLOp } from '~/model/backends/webgl/base_webgl_op.ts'
 import shaderSrc from '~/model/backends/webgl/shaders/stabilize.glsl'
+import chgSrc from '~/model/backends/webgl/shaders/stabilize_chg.glsl'
 
 // Flow-gated stabilizer. All inputs are 4-ch (1 group) at flow resolution.
 export class StabilizeWebGL extends WebGLOp {
@@ -16,6 +17,10 @@ export class StabilizeWebGL extends WebGLOp {
     envPrev: Tensor, params: StabilizeParams,
   ) {
     super(backend)
+    // The change gate lives in its own shader: with it off, this op is upstream's
+    // byte for byte (same shader, same uniforms).
+    const gate = (params.chgScale ?? 0) > 0
+    if (gate) this.shader = chgSrc
 
     const W = flow.w, H = flow.h
     const outTexture = this.makeTexture(null, W, H)
@@ -32,7 +37,7 @@ export class StabilizeWebGL extends WebGLOp {
     this.uniformFloats = {
       u_t_lo: params.tLo, u_t_hi: params.tHi, u_leak: params.leak, u_release: params.release,
       u_t_div: params.tDiv, u_div_scale: params.divScale,
-      u_t_chg: params.tChg ?? 0, u_chg_scale: params.chgScale ?? 0,
+      ...(gate ? { u_t_chg: params.tChg ?? 0, u_chg_scale: params.chgScale! } : {}),
     }
 
     this.defaultSetup()

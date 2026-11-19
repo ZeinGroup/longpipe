@@ -46,6 +46,9 @@ export class TierModel implements Op {
     wrapperWeights: UNetWrapperWeights,
     params: UNetWrapperParams,
     BaseCtor: BaseNetworkCtor,
+    // featuresOnly: run the base only up to featLowRes (its own alpha head is not
+    // read by the wrapper). Off by default: upstream's exact pass sequence.
+    opts: { featuresOnly?: boolean } = {},
   ) {
     this.inputs = [x_hr]
 
@@ -66,9 +69,9 @@ export class TierModel implements Op {
       wrapperWeights, params,
     )
 
-    // The base's own alpha head isn't read by the wrapper: skip it when the base
-    // can run features alone.
-    const baseStep = { run: () => (base.runFeatures ? base.runFeatures() : base.run()) }
+    // The base's own alpha head isn't read by the wrapper: skip it when asked and
+    // the base can run features alone.
+    const baseStep = opts.featuresOnly && base.runFeatures ? { run: () => base.runFeatures!() } : base
     this.steps = [...down.steps, baseStep, featUp, ...up.steps]
     this.output = up.alpha
     this.encoderTaps = base.encoderTaps
