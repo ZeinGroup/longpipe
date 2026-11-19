@@ -76,6 +76,24 @@ export type CmdName = keyof CmdDataMap
 
 // ── Init payload — transport endpoints + initial config ─────────────────────
 
+// Matte tuning for the display, all off by default (the shipped look). See
+// PipelineOptions.matte.
+export interface MatteOptions {
+  // smoothstep(lo, hi) on the display alpha: a tighter blend edge, so less of the
+  // original room shows through the transition around the subject.
+  ramp?:       [number, number]
+  // Blur the background alone (normalized convolution by 1 − alpha), so the
+  // subject's colours don't smear into the blurred room around it.
+  maskedBlur?: boolean
+  // 'guided': the display alpha follows the camera image's edges at full
+  // resolution (fast guided filter) instead of a plain bilinear enlargement.
+  refine?:     'guided'
+  // Stabilizer: also trust the fresh matte where it disagrees with the warped
+  // history by more than [threshold] (fully at threshold + width) — a moving
+  // hand, a gap that just opened between fingers.
+  changeGate?: [number, number]
+}
+
 export interface InitData {
   topology:   Topology
   // Segmentation model. MediaPipe skips autotune (resolvedPreset → null) and
@@ -89,6 +107,7 @@ export interface InitData {
   // already has its size); for MSTG and bitmap-shuttle the worker
   // allocates its own OffscreenCanvas and uses these dimensions.
   canvasSize: { w: number; h: number }
+  matte?:     MatteOptions
 
   // Backend + dtype are *preferences*. Worker's setup_backend honors them
   // when possible and falls back when not. 'auto' = pick the best available

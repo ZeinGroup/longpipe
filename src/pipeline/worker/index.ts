@@ -293,6 +293,7 @@ async function handleInit(data: InitData): Promise<InitResponse> {
     background:  data.background,
     enabled:     data.enabled,
     topology:    data.topology,
+    matte:       data.matte,
   })
 
   log('handleInit: createOutputSink…')

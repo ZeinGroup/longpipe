@@ -33,7 +33,7 @@ import { normalizeBackground } from './background'
 import type { AudioInput } from './audio'
 import type {
   InitData, InitResponse, BackendKind, ActiveBackend, PipelineStats, PipelineStatus,
-  ReadyInfo, RendererStats, WorkerErrorEvent,
+  ReadyInfo, RendererStats, WorkerErrorEvent, MatteOptions,
 } from './messages'
 import type { PipelineError, PipelineErrorType } from './errors'
 import { LongpipeError, isLongpipeError, errorMessage, prefixMessage } from './errors'
@@ -120,6 +120,9 @@ export interface PipelineOptions {
   // intrinsic size (preserves aspect ratio + avoids pointless rescale).
   // Falls back to 1280×720 if the track hasn't reported its size yet.
   outputResolution?: { w: number; h: number }
+  // Matte tuning for the display (alpha ramp, background-only blur, stabilizer
+  // change gate). Everything off by default: absent = the shipped behaviour.
+  matte?:          MatteOptions
   // Whether the SDK should auto-adjust preset at runtime when fps drops
   // (downgrade) or modelMs has consistent headroom (upgrade, WebGPU only).
   // Only takes effect when `preset: 'auto'` — explicit preset choices
@@ -686,6 +689,7 @@ export class Pipeline implements PromiseLike<Pipeline> {
         backend:     (this.attemptBackend = TUNING.forceBackend ?? workerBackend(this.opts.backend, this.preferBackend)),
         dtype:       this.opts.dtype ?? 'f16',
         canvasSize:  this.outputSize,
+        matte:       this.opts.matte,
         debug:       this.opts.debug,
         heartbeatMs: TUNING.heartbeatMs,
         ...input.initFields,
@@ -1544,4 +1548,4 @@ export type { DenoiseModel, DenoiseTier, DenoiseModelOption } from '~/audio/kern
 export type { AudioStats }                                    from '~/audio/messages.ts'
 export type { PipelineError, ErrorSource, PipelineErrorType } from './errors'
 export { LongpipeError }                                      from './errors'
-export type { ActiveBackend, PipelineStats, PipelineStatus, ReadyInfo } from './messages'
+export type { ActiveBackend, PipelineStats, PipelineStatus, ReadyInfo, MatteOptions } from './messages'

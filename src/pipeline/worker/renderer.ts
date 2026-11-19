@@ -67,7 +67,7 @@ const FACE_GROUP_TOL = 0.6
 const FACE_PROBE_INTERVAL = { webgpu: 6, webgl: 30 }
 import type { ManualPreset } from '../presets'
 import type { Background } from '../background'
-import type { RendererStats } from '../messages'
+import type { RendererStats, MatteOptions } from '../messages'
 import type { Topology } from '../topology'
 
 // Preview: render a *candidate* effect to a second canvas while the main
@@ -97,6 +97,7 @@ export interface RendererOptions {
   background:  Background
   enabled:     boolean
   topology:    Topology              // reported in stats for debug
+  matte?:      MatteOptions          // display-matte tuning; absent = shipped behaviour
 }
 
 // Renderer is constructed in boot mode (no preset / no weights / no network).
@@ -121,6 +122,7 @@ export class Renderer {
   private readonly backend:     Backend
   private readonly backendKind: 'webgpu' | 'webgl'
   private readonly topology:    Topology
+  private readonly matte:       MatteOptions
   // null until the first setPreset call. Stats use a 'boot' placeholder
   // while null; process() runs passthrough.
   private preset:  ManualPreset | null = null
@@ -258,6 +260,7 @@ export class Renderer {
     this.enabled           = opts.enabled
     this.currentBackground = opts.background
     this.topology          = opts.topology
+    this.matte             = opts.matte ?? {}
 
     // Boot mode — RenderOp builds only displayInput + passthroughCompositor.
     // The network is attached later via setPreset() once weights arrive.
@@ -750,6 +753,7 @@ export class Renderer {
     this.renderOp.attachNetwork(net, networkInput, {
       upscaler:   'bilinear',
       background: this.translateBackgroundFor('main', this.currentBackground),
+      ...this.displayAlphaOptions(),
     })
     this.flow            = null
     this.preset          = null
@@ -786,8 +790,9 @@ export class Renderer {
     )
 
     this.renderOp.attachNetwork(tier, networkInput, {
-      upscaler:   'bilinear',
+      upscaler:   this.matte.refine === 'guided' ? 'guided' : 'bilinear',
       background: this.translateBackgroundFor('main', this.currentBackground),
+      ...this.displayAlphaOptions(),
     })
 
     // Optical-flow temporal: wired iff the .bin carries a `flow` blob. The flow net
@@ -819,7 +824,8 @@ export class Renderer {
       // base/4 pixel on the upsampled flow (where the occlusion seam lives).
       const stepX = Math.max(1, Math.round(c.w / net.output.w))
       const stepY = Math.max(1, Math.round(c.h / net.output.h))
-      const stab     = this.backend.ops.Stabilize(up.output, predBuf, refWarp.output, stabPrev, { ...FLOW_STAB, stepX, stepY })
+      const chg      = this.matte.changeGate ? { tChg: this.matte.changeGate[0], chgScale: this.matte.changeGate[1] } : {}
+      const stab     = this.backend.ops.Stabilize(up.output, predBuf, refWarp.output, stabPrev, { ...FLOW_STAB, ...chg, stepX, stepY })
 
       // Skip tiers also warp the held last-inference alpha to make the skip-frame pred.
       const alphaHeld = everyFrame ? null : zeros(c.h, c.w)
@@ -1015,7 +1021,7 @@ export class Renderer {
       case 'color':
         return { mode: 'solid', color: bg.rgb }
       case 'blur':
-        return { mode: 'blur', sigma: bg.sigma }
+        return { mode: 'blur', sigma: bg.sigma, ...(this.matte.maskedBlur ? { masked: true } : {}) }
       case 'image': {
         const input = this.bgInputFor(this.bgImageInputs, target)
         input.setSource(bg.bitmap)
@@ -1041,6 +1047,12 @@ export class Renderer {
         return { mode: 'image', image: input.output }
       }
     }
+  }
+
+  // RenderOp options that shape the display alpha (MatteOptions.ramp).
+  private displayAlphaOptions(): { alphaRamp?: { lo: number; hi: number } } {
+    const r = this.matte.ramp
+    return r ? { alphaRamp: { lo: r[0], hi: r[1] } } : {}
   }
 
   // Get-or-create a per-target background Input op (canvas-sized).

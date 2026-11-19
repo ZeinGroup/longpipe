@@ -7,7 +7,7 @@ export { Pipeline as EffectsPipeline, LongpipeError } from '~/pipeline/index.ts'
 export { PRESETS } from '~/pipeline/presets.ts'
 export type {
   PipelineOptions, TouchupOptions, RecoveredInfo, TrackChange, AudioTrackChange,
-  PipelineErrorType, ActiveBackend, BackendPreference, PipelineStats, PipelineStatus, ReadyInfo,
+  PipelineErrorType, ActiveBackend, BackendPreference, PipelineStats, PipelineStatus, ReadyInfo, MatteOptions,
   BackgroundInput, Background, BlurInput, ColorInput, ImageInput, VideoInput,
   PresetName, ManualPreset, ModelName, ModelChoice,
   AudioMode, AudioInput, DenoiseOptions, DenoiseModel, DenoiseTier, DenoiseModelOption, AudioStats,
