@@ -10,6 +10,7 @@ export class AutoLighting implements DisplayLighting {
   private readonly emptyPoints: Tensor
   private readonly sceneMeter: Op
   private half?: Tensor
+  private wide?: Op[]
   private guide?: Op
   private subjectMeter?: Op
   private points?: Op
@@ -71,8 +72,15 @@ export class AutoLighting implements DisplayLighting {
     if (!active) return null
     this.half ??= this.backend.tensor(Math.max(1, Math.floor(this.height / 2)), Math.max(1, Math.floor(this.width / 2)), 4)
     sample(this.half)
+    // 1/4, 1/8, 1/16 by exact 2x averages of the half-resolution sample (tiny passes).
+    if (!this.wide) {
+      const down = (t: Tensor) => this.backend.ops.BilinearUpsample(t, { outH: Math.max(1, Math.floor(t.h / 2)), outW: Math.max(1, Math.floor(t.w / 2)) })
+      const quarter = down(this.half), eighth = down(quarter.output)
+      this.wide = [quarter, eighth, down(eighth.output)]
+    }
+    for (const op of this.wide) op.run()
     return {
-      guide: this.useMatte ? this.guide!.output : this.emptyGuide, half: this.half,
+      guide: this.useMatte ? this.guide!.output : this.emptyGuide, half: this.half, wide: this.wide[2].output,
       gain: 2 ** levels.ev, localGain: this.useMatte ? 2 ** levels.local : 1, red: 2 ** levels.red, blue: 2 ** levels.blue
     }
   }

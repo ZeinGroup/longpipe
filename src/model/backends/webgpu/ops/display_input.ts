@@ -123,14 +123,16 @@ export class DisplayInputWebGPU implements DisplayInputOp {
         { binding: 3, resource: { buffer: out.buffer } },
       ];
       if (light) {
-        this.lightParams ??= this.device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-        const ab = new ArrayBuffer(32);
+        this.lightParams ??= this.device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+        const wide = light.wide ?? light.half;
+        const ab = new ArrayBuffer(48);
         new Float32Array(ab, 0, 4).set([light.gain, light.localGain, light.red, light.blue]);
-        new Uint32Array(ab, 16).set([light.guide.w,light.guide.h,light.half.w,light.half.h]);
+        new Uint32Array(ab, 16).set([light.guide.w,light.guide.h,light.half.w,light.half.h, wide.w, wide.h, 0, 0]);
         this.device.queue.writeBuffer(this.lightParams, 0, ab);
         entries.push({ binding: 4, resource: { buffer: this.lightParams } },
           { binding: 5, resource: { buffer: (light.guide as WebGPUTensor).buffer } },
-          { binding: 6, resource: { buffer: (light.half as WebGPUTensor).buffer } });
+          { binding: 6, resource: { buffer: (light.half as WebGPUTensor).buffer } },
+          { binding: 7, resource: { buffer: (wide as WebGPUTensor).buffer } });
       }
       const group = this.device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries });
       this.dispatchOnce(pipeline, group, [Math.ceil(out.w/8),Math.ceil(out.h/8),1]);

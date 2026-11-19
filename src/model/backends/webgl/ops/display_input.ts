@@ -72,7 +72,7 @@ export class DisplayInputWebGL implements DisplayInputOp {
       throw new Error(`Input GLSL link error: ${gl.getProgramInfoLog(program)}`)
     const loc = (name: string) => gl.getUniformLocation(program, name)
     return { program, src: loc('u_src'), w: loc('u_out_w'), h: loc('u_out_h'),
-      uvX: loc('u_uv_x'), uvY: loc('u_uv_y'), gain: loc('u_gain'), guide: loc('u_guide'), half: loc('u_half') }
+      uvX: loc('u_uv_x'), uvY: loc('u_uv_y'), gain: loc('u_gain'), guide: loc('u_guide'), half: loc('u_half'), wide: loc('u_wide') }
 
   }
 
@@ -115,6 +115,9 @@ export class DisplayInputWebGL implements DisplayInputOp {
       gl.activeTexture(gl.TEXTURE2)
       gl.bindTexture(gl.TEXTURE_2D, (light.half as WebGLTensor).texture)
       gl.uniform1i(p.half, 2)
+      gl.activeTexture(gl.TEXTURE3)
+      gl.bindTexture(gl.TEXTURE_2D, ((light.wide ?? light.half) as WebGLTensor).texture)
+      gl.uniform1i(p.wide, 3)
       gl.uniform4f(p.gain, light.gain, light.localGain, light.red, light.blue)
     }
     gl.activeTexture(gl.TEXTURE0)

@@ -185,7 +185,8 @@ it('keeps one meter read in flight and discards a result from the previous camer
   const readbackDeferred = vi.fn(() => new Promise<Float32Array>(resolve => { deliver = resolve }))
   const tensor = (h: number, w: number, c: number) => ({ h, w, c })
   const meter = { run: vi.fn(), output: tensor(9, 16, 12) }
-  const backend = { tensor, readbackDeferred, ops: { LightingMeter: () => meter } } as unknown as Backend
+  const down = (t: { h: number; w: number }, p: { outH: number; outW: number }) => ({ run: vi.fn(), output: tensor(p.outH, p.outW, 4), from: t })
+  const backend = { tensor, readbackDeferred, ops: { LightingMeter: () => meter, BilinearUpsample: down } } as unknown as Backend
   const lighting = new AutoLighting(backend, 1280, 720)
   const sample = vi.fn()
   const settle = () => new Promise(resolve => setTimeout(resolve, 0))
@@ -206,7 +207,11 @@ it('keeps one meter read in flight and discards a result from the previous camer
     deliver(tiles(-7))
     await settle()
     now += 100
-    expect(lighting.prepare(sample)?.gain).toBeGreaterThan(1)
+    const adjustment = lighting.prepare(sample)
+    expect(adjustment?.gain).toBeGreaterThan(1)
+    // the colour reference: three exact halvings of the half-resolution sample, 1/16 of 1280x720
+    expect(adjustment?.half).toMatchObject({ h: 360, w: 640 })
+    expect(adjustment?.wide).toMatchObject({ h: 45, w: 80 })
     expect(meter.run).toHaveBeenCalledTimes(2)
   } finally { clock.mockRestore() }
 })
