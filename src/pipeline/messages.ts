@@ -104,6 +104,7 @@ export interface InitData {
   preset:     PresetName | ManualPreset
   background: Background
   enabled:    boolean
+  outputReadback?: boolean   // generator output path: post copies in memory of the output (default true)
   lighting?:  boolean
   // Output canvas dimensions. For transfer-capture topology this is
   // redundant with outputCanvas (the transferred OffscreenCanvas
@@ -191,6 +192,10 @@ export interface RendererStats {
   // worker/latency.ts. 0 when no frames are flowing through the worker (e.g.
   // while main serves raw passthrough).
   latencyMs:     number
+
+  // Generator output path: median time (ms, ~1 s window) to copy a rendered frame
+  // to memory before it is posted to the output track; 0 when off or elsewhere.
+  outputReadbackMs: number
 }
 
 export type PipelineStatus =

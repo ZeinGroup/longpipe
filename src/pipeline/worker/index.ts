@@ -421,7 +421,7 @@ function getStats(): RendererStats | null {
     fps: frameTimes.length, modelFps: 0, modelMs: 0, displayMs: 0, skipped: 0,
     preset: 'none', skipFrames: 0, enabled: false,
     inputPath: initData.topology.input, outputPath: initData.topology.output,
-    backend: 'none', adapter: '', latencyMs: meanLatencyMs(),
+    backend: 'none', adapter: '', latencyMs: meanLatencyMs(), outputReadbackMs: 0,
   }
 }
 

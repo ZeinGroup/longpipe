@@ -256,6 +256,8 @@ export class Renderer {
   private framesRenderedAt: number[]                       = []
   private modelRunSamples:   { ts: number; ms: number }[]   = []
   private displayRunSamples: { ts: number; ms: number }[]   = []
+  // Output read-back times (generator output path), same window as the others.
+  private readonly readbackSamples: { ts: number; ms: number }[] = []
   private skippedCount:      number                          = 0
 
   constructor(opts: RendererOptions) {
@@ -390,6 +392,11 @@ export class Renderer {
       const fence = this.glFences.shift()!
       if (gl) await waitForFence(gl, fence)
     }
+  }
+  // Called by the output sink after each read-back of a rendered frame.
+  noteOutputReadback(ms: number): void {
+    this.readbackSamples.push({ ts: performance.now(), ms })
+    this.trimSamples(this.readbackSamples)
   }
   markSubmitted(): void {
     if (this.backendKind === 'webgpu') {
@@ -1035,6 +1042,7 @@ export class Renderer {
     this.trimRecent(this.framesRenderedAt, now)
     this.trimSamplesAt(this.modelRunSamples,   now)
     this.trimSamplesAt(this.displayRunSamples, now)
+    this.trimSamplesAt(this.readbackSamples, now)
     return {
       // window is 1s, so length = events-per-second
       fps:        this.framesRenderedAt.length,
@@ -1049,6 +1057,7 @@ export class Renderer {
       outputPath: this.topology.output,
       backend:    this.backendKind === 'webgl' ? 'webgl2' : 'webgpu',
       adapter:    this.backend.adapterInfo ?? '',
+      outputReadbackMs: Math.round(median(this.readbackSamples.map(s => s.ms)) * 100) / 100,
     }
   }
 

@@ -132,6 +132,11 @@ export interface PipelineOptions {
   adaptive?:       boolean
   // Automatic lighting correction. Off by default. Works with any background.
   lighting?:       boolean
+  // Generator output path only (MediaStreamTrackGenerator; the canvas-capture paths
+  // are unaffected): post each output frame as a copy in memory rather than a canvas
+  // snapshot, so a software encoder does not read the GPU back within its own time.
+  // Default true; false posts the snapshots, for an A/B.
+  outputReadback?: boolean
   // Face touch-up (UV-space skin smoothing). Presence enables it; runs in
   // PARALLEL with any background effect (one shared encoder pass; the
   // retouched frame feeds the background compositor). Requires tier weights
@@ -695,6 +700,7 @@ export class Pipeline implements PromiseLike<Pipeline> {
         dtype:       this.opts.dtype ?? 'f16',
         canvasSize:  this.outputSize,
         matte:       this.opts.matte,
+        outputReadback: this.opts.outputReadback ?? true,
         debug:       this.opts.debug,
         heartbeatMs: TUNING.heartbeatMs,
         ...input.initFields,
@@ -1442,6 +1448,7 @@ export class Pipeline implements PromiseLike<Pipeline> {
       inputPath:  this.topology.input,
       outputPath: this.output.path,
       adapter:    worker?.adapter ?? '',
+      outputReadbackMs: mainRaw ? 0 : worker?.outputReadbackMs ?? 0,
       ...main,
     }
   }

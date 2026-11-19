@@ -33,7 +33,7 @@ export function createOutputSink(
       if (!data.outputFramePort) {
         throw new Error("create_output: topology.output='mstg' but InitData.outputFramePort missing")
       }
-      return createMstgOutput(renderer, data.outputFramePort, onFrame)
+      return createMstgOutput(renderer, data.outputFramePort, onFrame, { readback: data.outputReadback ?? true })
     }
 
     case 'transfer-capture':
