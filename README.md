@@ -1,6 +1,6 @@
 # Longpipe 🐉
 
-Fast, high-quality video effects in the browser — virtual backgrounds, face touch-up, auto-reframe, and mic noise removal in one open-source SDK.
+Fast, high-quality video effects in the browser — virtual backgrounds, automatic lighting, face touch-up, auto-reframe, and mic noise removal in one open-source SDK.
 
 <img width="960" height="540" alt="video-effects-sdk" src="https://github.com/user-attachments/assets/5dbe1ccb-09dd-4f22-b4be-e3122767dbcc" />
 
@@ -22,6 +22,7 @@ const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: t
 
 const pipeline = new EffectsPipeline(stream, {
   background: 'blur',   // or an image, video, or solid color
+  lighting: true,       // automatically lift a dim camera
   touchup: true,        // skin smoothing
   reframe: true,        // auto-frame the subject
   audio: 'denoise',     // mic noise removal
@@ -62,6 +63,7 @@ Full docs live at **[longpipe.dev/docs](https://longpipe.dev/docs)**:
 - [API reference](https://longpipe.dev/docs/api) — all `EffectsPipeline` options and methods
 - [Architecture](https://longpipe.dev/docs/architecture) — the hydranet: one encoder, many heads
 - [Backgrounds](https://longpipe.dev/docs/backgrounds) · [Touch-up](https://longpipe.dev/docs/touchup) · [Auto-reframe](https://longpipe.dev/docs/reframe) · [Audio denoise](https://longpipe.dev/docs/audio)
+- [Automatic lighting](docs/lighting.md) — opt in with `lighting: true` or switch it live with `await pipeline.setLighting(on)`
 - [Presets & autotune](https://longpipe.dev/docs/presets)
 - [Model layer](https://longpipe.dev/docs/model-layer) — drive the model directly, without the pipeline
 - [Self-hosting weights](https://longpipe.dev/docs/self-hosting)
@@ -77,7 +79,7 @@ Machine-readable for LLMs and agents: [`llms.txt`](https://longpipe.dev/llms.txt
 - [x] Multi-face support
 - [x] Auto-reframe
 - [ ] AR effects
-- [ ] Lighting correction
+- [x] Lighting correction
 
 ## License
 

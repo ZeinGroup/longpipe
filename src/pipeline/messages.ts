@@ -31,6 +31,7 @@ export interface CmdDataMap {
   attachPreview: { canvas: OffscreenCanvas }
   setPreview:    { background: Background; fps?: number }
   clearPreview:  Record<string, never>
+  setLighting:   boolean
   // Face touch-up: full payload enables/updates (assets are cached main-side
   // and structured-cloned — no transfer, so param updates can resend them);
   // null disables. The worker assembles a FaceEffectsConfig for the renderer.
@@ -54,6 +55,7 @@ export interface CmdResponseMap {
   attachPreview: void
   setPreview:    void
   clearPreview:  void
+  setLighting:   void
   setTouchup:    void
   setReframe:    void
   reframeNow:    void
@@ -102,6 +104,7 @@ export interface InitData {
   preset:     PresetName | ManualPreset
   background: Background
   enabled:    boolean
+  lighting?:  boolean
   // Output canvas dimensions. For transfer-capture topology this is
   // redundant with outputCanvas (the transferred OffscreenCanvas
   // already has its size); for MSTG and bitmap-shuttle the worker

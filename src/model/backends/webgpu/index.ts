@@ -1,3 +1,4 @@
+import { LightingWebGPU } from './ops/lighting'
 import type { Backend, Dtype, DataView_, RenderTarget } from "~/model/backend.ts";
 import type { WebGPUTensor, WebGPUMLBuffer } from "~/model/backends/webgpu/base_webgpu_op.ts";
 import { float32ArrayToHalf, halfArrayToFloat32 } from "~/utils/fp16.ts";
@@ -102,6 +103,9 @@ export class WebGPUBackend implements Backend {
       ReframeState: (boxes, prev, cmd, params)           => new ReframeStateWebGPU(this, boxes, prev, cmd, params),
       Reframe: (src, rect)                               => new ReframeWebGPU(this, src, rect),
       CropResample:     (frame, box, params)             => new CropResampleWebGPU(this, frame, box, params),
+      LightingPoints: (heatmaps, box) => LightingWebGPU.points(this, heatmaps, box),
+      LightingGuide: (alpha, points, w, h) => LightingWebGPU.guide(this, alpha, points, w, h),
+      LightingMeter: (raw, guide) => LightingWebGPU.meter(this, raw, guide),
       FaceTouchupStage: (frame, landmarks, box, topo, params) => new FaceTouchupStageWebGPU(this, frame, landmarks, box, topo, params),
       Stabilize:        (flow, pred, ref, envPrev, params) => new StabilizeWebGPU(this, flow, pred, ref, envPrev, params),
       AlphaRamp:        (alpha, params)                 => new AlphaRampWebGPU(this, alpha, params),

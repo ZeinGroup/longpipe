@@ -253,12 +253,25 @@ export type ImageSource = ImageBitmap | VideoFrame;
 // frames (its contents are overwritten in place). Caller pattern:
 //   inputOp.setSource(frame); inputOp.run();
 // then downstream ops read inputOp.output.
+// Only the display Input receives this hook. sample() resamples its already
+// uploaded camera source into a small tensor using the ordinary raw shader.
+export interface DisplayLighting {
+  prepare(sample: (out: Tensor) => void): LightAdjustment | null
+}
+export interface LightAdjustment {
+  guide: Tensor
+  half: Tensor
+  gain: number
+  localGain: number
+  red: number
+  blue: number
+}
 export interface InputOp {
   readonly output: Tensor;
   // `orientation`: display transform (rotation, flip) the source still needs,
   // applied while sampling so `output` is upright. Omitted = identity.
   setSource(src: ImageSource, orientation?: Orientation | null): void;
-  run(): void;
+  run(lighting?: DisplayLighting): void;
 }
 
 // Initial data for tensor() and parameters for upload() may arrive as Float32
@@ -403,6 +416,13 @@ export interface Backend {
     UpsampleConv1x1: (input: Tensor, weights: Conv2DWeights,                  params: UpsampleConv1x1Params) => Op;
     UpsampleSigmoid: (input: Tensor, params: UpsampleParams) => Op;
 
+    // Lighting meter inputs are upright. Points refines five heatmaps inside
+    // the first box. Guide packs local fill, interior and facial weights into
+    // xyz. Meter reduces matched raw/guide tensors in 6×6 tiles (12 channels).
+    LightingPoints: (heatmaps: Tensor, box: Tensor) => Op;
+    LightingGuide: (alpha: Tensor, points: Tensor, w: number, h: number) => Op;
+    LightingMeter: (sample: Tensor, guide: Tensor) => Op;
+
     // Image source ingestion. Bilinear-resamples the source down to (h, w, 4).
     Input:           (h: number, w: number) => InputOp;
   };
@@ -447,6 +467,10 @@ export interface Backend {
   // Read tensor data back to host as fp32. The tensor must have been allocated
   // by this backend; conversion from fp16 storage is handled internally.
   readback(tensor: Tensor): Promise<Float32Array>;
+
+  // WebGL meters must stage through a pixel-pack buffer. WebGPU readback
+  // already uses asynchronous buffer mapping.
+  readbackDeferred?(tensor: Tensor): Promise<Float32Array>;
 
   // GPU-resident copy of src's contents into dst (identical shape + dtype).
   // Stays entirely on-device — no readback, no CPU round-trip. Used to thread

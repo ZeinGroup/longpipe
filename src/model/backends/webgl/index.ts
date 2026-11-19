@@ -1,3 +1,4 @@
+import { LightingWebGL } from './ops/lighting'
 import type { Backend, Dtype, DataView_, RenderTarget } from '~/model/backend.ts'
 import type { WebGLTensor, WebGLMLBuffer } from '~/model/backends/webgl/base_webgl_op.ts'
 import { float32ArrayToHalf, halfArrayToFloat32 } from '~/utils/fp16.ts'
@@ -77,6 +78,9 @@ export class WebGLBackend implements Backend {
     readonly canvas: HTMLCanvasElement | OffscreenCanvas,
     readonly dtype: Dtype,
   ) {
+    // The display shader decodes full-range sRGB after the browser's video
+    // matrix/range conversion. This is also WebGL's default unpack space.
+    if ('unpackColorSpace' in gl) gl.unpackColorSpace = 'srgb'
     this.fbo = gl.createFramebuffer()!
     this.textureFormat = dtype === 'f16'
       ? { internalFormat: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT, bytesPerElement: 2 }
@@ -98,6 +102,9 @@ export class WebGLBackend implements Backend {
       ReframeState: (boxes, prev, cmd, params)           => new ReframeStateWebGL(this, boxes, prev, cmd, params),
       Reframe: (src, rect)                               => new ReframeWebGL(this, src, rect),
       CropResample:     (frame, box, params)             => new CropResampleWebGL(this, frame, box, params),
+      LightingPoints: (heatmaps, box) => LightingWebGL.points(this, heatmaps, box),
+      LightingGuide: (alpha, points, w, h) => LightingWebGL.guide(this, alpha, points, w, h),
+      LightingMeter: (raw, guide) => LightingWebGL.meter(this, raw, guide),
       FaceTouchupStage: (frame, landmarks, box, topo, params) => new FaceTouchupStageWebGL(this, frame, landmarks, box, topo, params),
       Stabilize:        (flow, pred, ref, envPrev, params) => new StabilizeWebGL(this, flow, pred, ref, envPrev, params),
       AlphaRamp:        (alpha, params)                 => new AlphaRampWebGL(this, alpha, params),
@@ -254,6 +261,42 @@ export class WebGLBackend implements Backend {
     gl.readPixels(0, 0, tensor.texW, tensor.texH, fmt.format, gl.FLOAT, px)
     gl.bindFramebuffer(gl.FRAMEBUFFER, null)
     return px
+  }
+
+  // Offset-form readPixels enqueues a GPU transfer. Only touch its small PBO
+  // on the CPU after the fence signals on a later worker task.
+  async readbackDeferred(tensor: WebGLTensor): Promise<Float32Array> {
+    const gl = this.gl
+    const pixels = new Float32Array(tensor.texW * tensor.texH * 4)
+    const pbo = gl.createBuffer()
+    if (!pbo) throw new Error('lighting meter: cannot allocate pixel pack buffer')
+    let fence: WebGLSync | null = null
+    try {
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fbo)
+      gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tensor.texture, 0)
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo)
+      gl.bufferData(gl.PIXEL_PACK_BUFFER, pixels.byteLength, gl.STREAM_READ)
+      gl.readPixels(0, 0, tensor.texW, tensor.texH, gl.RGBA, gl.FLOAT, 0)
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null)
+      fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)
+      if (!fence) throw new Error('lighting meter: cannot create fence')
+      gl.flush()
+      const deadline = performance.now() + 1000
+      for (;;) {
+        await new Promise(r => setTimeout(r, 8))
+        const status = gl.clientWaitSync(fence, 0, 0)
+        if (status === gl.ALREADY_SIGNALED || status === gl.CONDITION_SATISFIED) break
+        if (status === gl.WAIT_FAILED || performance.now() > deadline) throw new Error('lighting meter: fence unavailable')
+      }
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo)
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, pixels)
+      return pixels
+    } finally {
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
+      if (fence) gl.deleteSync(fence)
+      gl.deleteBuffer(pbo)
+    }
   }
 
   // GPU-resident texture→texture copy (no CPU round-trip). Binds src as the

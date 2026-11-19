@@ -1,0 +1,39 @@
+// Fused into display ingestion (either a texture_external or the 2D fallback).
+struct LightParams { gain: vec4<f32>, dims: vec4<u32> } // guide wh, half wh
+@group(0) @binding(4) var<uniform> light: LightParams;
+@group(0) @binding(5) var<storage,read> guide: array<Pixel>;
+@group(0) @binding(6) var<storage,read> halfFrame: array<Pixel>;
+fn localWeight(uv: vec2<f32>) -> f32 {
+    if (light.gain.y == 1.0) { return 0.0; }
+    let size = light.dims.xy;
+    let pos = clamp(uv * vec2<f32>(size) - vec2<f32>(0.5),vec2<f32>(0),vec2<f32>(size - vec2<u32>(1)));
+    let a = vec2<u32>(pos); let b = min(a + vec2<u32>(1), size - vec2<u32>(1));
+    let f = fract(pos);
+    return mix(mix(f32(guide[a.y*size.x+a.x].x),f32(guide[a.y*size.x+b.x].x),f.x),
+                     mix(f32(guide[b.y*size.x+a.x].x),f32(guide[b.y*size.x+b.x].x),f.x),f.y);
+}
+fn correctLighting(src: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
+    let weight = localWeight(uv);
+    let hp = min(vec2<u32>(uv*vec2<f32>(light.dims.zw)),light.dims.zw - vec2<u32>(1));
+    let halfRgb = vec3<f32>(halfFrame[hp.y*light.dims.z+hp.x].rgb);
+    let luma = vec3<f32>(0.2126,0.7152,0.0722);
+    let delta = halfRgb-src;
+    let dy = dot(delta,luma);
+    var denoise = min(0.6,(light.gain.x-1.0)*0.45)*(1.0-smoothstep(0.025,0.09,abs(dy)))
+                * (1.0-smoothstep(0.18,0.48,dot(src,luma)));
+    let chroma = delta-vec3<f32>(dy);
+    denoise *= 1.0-smoothstep(0.065,0.16,max(abs(chroma.r),max(abs(chroma.g),abs(chroma.b))));
+    var c = clamp(src+denoise*chroma,vec3<f32>(0),vec3<f32>(1));
+    let linear = select(c / vec3<f32>(12.92),pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055),vec3<f32>(2.4)),c>vec3<f32>(0.04045));
+    let lift = mix(1.0,light.gain.x*mix(1.0,light.gain.y,weight),smoothstep(0.002,0.025,dot(linear,luma)));
+    let rgb = linear*vec3<f32>(light.gain.z,1,light.gain.w);
+    let peak = max(max(rgb.r,rgb.g),rgb.b);
+    var scale = lift/(1.0+(lift-1.0)*peak);
+    let p = peak*scale;
+    let limit = max(1.0,max(light.gain.z,light.gain.w));
+    let curvature = (limit-1.0)/(0.2*(limit-0.8));
+    let excess = max(0.0,p-0.8);
+    if (p>0.8) { scale *= (0.8+excess/(1.0+curvature*excess))/p; }
+    c = rgb*scale;
+    return select(12.92*c,1.055 * pow(c, vec3<f32>(1.0/2.4)) - vec3<f32>(0.055),c>vec3<f32>(0.0031308));
+}

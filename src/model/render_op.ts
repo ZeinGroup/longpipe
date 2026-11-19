@@ -1,4 +1,4 @@
-import { runBatched, type Backend, type Tensor, type InputOp, type ImageSource, type RenderTarget, type AlphaRampParams } from '~/model/backend.ts'
+import { runBatched, type Backend, type DisplayLighting, type Tensor, type InputOp, type ImageSource, type RenderTarget, type AlphaRampParams } from '~/model/backend.ts'
 import type { Orientation } from '~/model/orientation.ts'
 import { BilinearUpscaler } from '~/model/effects/upscale_bilinear.ts'
 import { BicubicUpscaler  } from '~/model/effects/upscale_bicubic.ts'
@@ -110,6 +110,7 @@ export class RenderOp<N extends NetworkLike = NetworkLike> {
   // setSource. Lets the renderer refresh early (effect stages read the image
   // before compositing) without double uploads.
   private displayDirty = false
+  private lighting?: DisplayLighting
 
   // Per-target compositor cache, keyed by RenderTarget. compositeTo() builds a
   // compositor on first use of a (target, spec) and reuses it until the spec
@@ -171,10 +172,17 @@ export class RenderOp<N extends NetworkLike = NetworkLike> {
     this.bgConfig = config
   }
 
-  // The raw display image tensor (output-canvas res). Effect stages bind this
+  // The display image (output-canvas res, including any automatic lighting). Stages bind this
   // (or an earlier stage's output) as their input.
   get displayImage(): Tensor {
     return this.image
+  }
+
+  // Lighting only reuses a matte when this frame's graph produces one.
+  get modelAlpha(): Tensor | null { return this.network?.output ?? null }
+
+  setDisplayLighting(lighting?: DisplayLighting): void {
+    this.lighting = lighting
   }
 
   // Current foreground: the effect-chain tail (or raw image), reframed if a view
@@ -284,7 +292,7 @@ export class RenderOp<N extends NetworkLike = NetworkLike> {
   // targets (main + preview), so re-running it per target would be wasted work.
   refreshDisplayInput(): void {
     if (!this.displayDirty) return
-    this.displayInput.run()
+    this.displayInput.run(this.lighting)
     this.displayDirty = false
   }
 

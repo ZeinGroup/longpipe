@@ -28,6 +28,7 @@ for (const name of ['input', 'bg', 'color', 'denoise', 'backend', 'model']) {
 // ?preset=fast|balanced|quality (what the e2e tests pass) → the matching tier.
 const PRESET_PARAM = { fast: 'xs', balanced: 'medium', quality: 'xl', auto: 'auto' }[params.get('preset')]
 if (PRESET_PARAM && !params.has('model')) form.elements.model.value = PRESET_PARAM
+form.elements.lighting.checked = params.get('lighting') === '1'
 form.elements.bypass.checked = params.get('bypass') === '1'
 form.elements.flash.checked = params.get('flash') === '1'
 // MP4 (H.264) first; the WebM (VP9) copy that `npm run e2e:assets` makes with ffmpeg covers
@@ -75,6 +76,7 @@ function readConfig() {
     input: f.input.value,
     bg: f.bg.value,
     color: f.color.value,
+    lighting: f.lighting.checked,
     denoise: f.denoise.value === 'on',
     backend: f.backend.value,
     model: f.model.value,
@@ -87,7 +89,7 @@ function readConfig() {
 // The model control → EffectsPipeline options.
 //   'auto'             benchmark the device, then the adaptive controller moves between tiers
 //   'xs' … 'xl'        one fixed Longpipe tier (a PRESETS entry), no adaptive controller
-//   'mediapipe'        Google's MediaPipe Selfie Segmenter (background effects only)
+//   'mediapipe'        Google's MediaPipe Selfie Segmenter (backgrounds and lighting)
 const isTier = (m) => PRESETS.some((p) => p.model === m)
 function modelOptions(model) {
   if (model === 'mediapipe') return { model: 'mediapipe-selfie' }
@@ -112,6 +114,7 @@ async function backgroundFor(cfg) {
 function startPipeline(cfg, stream, background) {
   const p = new EffectsPipeline(stream, {
     background,
+    lighting: cfg.lighting,
     backend: cfg.backend,                 // 'auto' in production
     ...modelOptions(cfg.model),
     weightsBaseUrl: WEIGHTS,
@@ -357,6 +360,9 @@ form.elements.bg.addEventListener('change', async () => {
 })
 form.elements.color.addEventListener('input', () => {
   if (pipeline && form.elements.bg.value === 'color') pipeline.setBackground({ color: form.elements.color.value }).catch(() => {})
+})
+form.elements.lighting.addEventListener('change', () => {
+  pipeline?.setLighting(form.elements.lighting.checked).catch(e => log(`setLighting: ${e.type}`))
 })
 form.elements.denoise.addEventListener('change', () => pipeline?.setDenoise(form.elements.denoise.value === 'on'))
 form.elements.backend.addEventListener('change', () => serial('restart', restartPipeline))

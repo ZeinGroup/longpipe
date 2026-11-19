@@ -7,6 +7,7 @@ import { runBatched, type Backend, type Tensor, type InputOp, type Op, type Rend
 // Streams API pipe chain (inputReadable → transform → outputWritable) is
 // wired in worker/index.ts handleInit() where transport adapters are
 // composed with this renderer.
+import { AutoLighting } from '~/model/effects/auto_lighting.ts'
 import { RenderOp, type BackgroundConfig as RenderOpBackgroundConfig, type CompositeSpec } from '~/model/render_op.ts'
 import { loadWeightsFromBinary } from '~/utils/loadWeights.ts'
 import { TierModel } from '~/model/tier_model.ts'
@@ -96,6 +97,7 @@ export interface RendererOptions {
   canvas:      OffscreenCanvas
   background:  Background
   enabled:     boolean
+  lighting?:   boolean
   topology:    Topology              // reported in stats for debug
   matte?:      MatteOptions          // display-matte tuning; absent = shipped behaviour
 }
@@ -130,6 +132,9 @@ export class Renderer {
   // model runs every frame and every tier-dependent path stays off). Doubles as
   // the stats label.
   private mediapipe: MediaPipeSelfieVariant | null = null
+  private lightingEnabled: boolean
+  private lastMatteAt = -Infinity
+  private lighting?: AutoLighting
   private enabled: boolean
   // Current background tracked here so setPreset can rebuild the RenderOp
   // with the same background (otherwise an adaptive swap would flash to
@@ -257,6 +262,7 @@ export class Renderer {
     this.backend           = opts.backend
     this.backendKind       = opts.backendKind
     this.canvas            = opts.canvas
+    this.lightingEnabled   = opts.lighting ?? false
     this.enabled           = opts.enabled
     this.currentBackground = opts.background
     this.topology          = opts.topology
@@ -336,6 +342,8 @@ export class Renderer {
   // state; the resized canvas is drawn in the same task (no blank frame).
   resizeOutput(w: number, h: number): void {
     if (w === this.canvas.width && h === this.canvas.height) return
+    this.resetLighting()
+    this.lighting = undefined
     this.canvas.width  = w
     this.canvas.height = h
     if (this.previewCanvas) {
@@ -442,6 +450,20 @@ export class Renderer {
     // crop → landmarks. Runs every frame while active; the touch-up stage itself
     // runs inside the RenderOp effect chain during the composite below.
     if (faceActive) this.stepFace(ranModel)
+
+    if (ranModel) this.lastMatteAt = now
+    if (this.enabled && this.lightingEnabled && hasNet) {
+      this.lighting ??= new AutoLighting(this.backend, this.canvas.width, this.canvas.height)
+      const fc = faceActive ? this.faceChain : null
+      // A throttled preview can be the only matte producer. Hold that matte
+      // between its ticks so local fill does not pulse at the preview rate.
+      const matteCurrent = this.lastMatteAt > -Infinity && (needsModel || now - this.lastMatteAt <= 250)
+      this.lighting.setInputs(matteCurrent ? this.renderOp.modelAlpha : null,
+        fc?.hmBuf ?? null, fc?.boxStable ?? null)
+      this.renderOp.setDisplayLighting(this.lighting)
+    } else {
+      this.renderOp.setDisplayLighting(undefined)
+    }
 
     // Composite. The display input (full-res image, shared by both surfaces) is
     // refreshed once inside whichever composite path runs first.
@@ -690,7 +712,18 @@ export class Renderer {
     this.renderOp.setBackground(this.translateBackgroundFor('main', bg))
   }
 
+  resetLighting(): void {
+    this.lastMatteAt = -Infinity
+    this.lighting?.reset()
+  }
+
+  setLighting(on: boolean): void {
+    if (on !== this.lightingEnabled) this.resetLighting()
+    this.lightingEnabled = on
+  }
+
   setEnabled(on: boolean): void {
+    if (on !== this.enabled) this.resetLighting()
     this.enabled = on
   }
 
@@ -750,6 +783,7 @@ export class Renderer {
     this.lastWeightsBuf = weightsBuf
     const networkInput = this.backend.ops.Input(cfg.inputRes.h, cfg.inputRes.w)
     const net = new MediaPipeSelfie(this.backend, networkInput.output, w)
+    this.lastMatteAt = -Infinity
     this.renderOp.attachNetwork(net, networkInput, {
       upscaler:   'bilinear',
       background: this.translateBackgroundFor('main', this.currentBackground),
@@ -789,6 +823,7 @@ export class Renderer {
       this.backend, networkInput.output, w.base, w.wrapper, cfg.wrapper, cfg.base,
     )
 
+    this.lastMatteAt = -Infinity
     this.renderOp.attachNetwork(tier, networkInput, {
       upscaler:   this.matte.refine === 'guided' ? 'guided' : 'bilinear',
       background: this.translateBackgroundFor('main', this.currentBackground),
@@ -972,6 +1007,7 @@ export class Renderer {
   get backendHandle(): Backend { return this.backend }
 
   destroy(): void {
+    this.resetLighting()
     for (const port of this.bgVideoPorts.values()) port.close()
     this.bgVideoPorts.clear()
     this.backend.destroy()

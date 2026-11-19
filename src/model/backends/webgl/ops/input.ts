@@ -1,4 +1,5 @@
-import type { ImageSource, InputOp } from '~/model/backend.ts'
+import lightingSrc from '../shaders/lighting_input.glsl'
+import type { DisplayLighting, LightAdjustment, ImageSource, InputOp } from '~/model/backend.ts'
 import type { WebGLBackend } from '~/model/backends/webgl/index.ts'
 import type { WebGLTensor } from '~/model/backends/webgl/base_webgl_op.ts'
 import inputSrc from '~/model/backends/webgl/shaders/input.glsl'
@@ -20,13 +21,9 @@ export class InputWebGL implements InputOp {
   readonly output: WebGLTensor
 
   private readonly gl: WebGL2RenderingContext
-  private readonly program: WebGLProgram
+  private readonly raw: ReturnType<InputWebGL['compile']>
+  private lit?: ReturnType<InputWebGL['compile']>
   private readonly srcTex: WebGLTexture
-  private readonly uOutW: WebGLUniformLocation
-  private readonly uOutH: WebGLUniformLocation
-  private readonly uSrc:  WebGLUniformLocation
-  private readonly uUvX:  WebGLUniformLocation
-  private readonly uUvY:  WebGLUniformLocation
   private orientation: Orientation | null = null
 
   private source: ImageSource | null = null
@@ -43,27 +40,32 @@ export class InputWebGL implements InputOp {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S,     gl.CLAMP_TO_EDGE)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T,     gl.CLAMP_TO_EDGE)
 
+    this.raw = this.compile(inputSrc)
+  }
+
+  private compile(source: string) {
+    const gl = this.gl
     const vert = gl.createShader(gl.VERTEX_SHADER)!
     gl.shaderSource(vert, QUAD_VERT)
     gl.compileShader(vert)
     const frag = gl.createShader(gl.FRAGMENT_SHADER)!
-    gl.shaderSource(frag, inputSrc)
+    gl.shaderSource(frag, source)
     gl.compileShader(frag)
     if (!gl.getShaderParameter(frag, gl.COMPILE_STATUS))
       throw new Error(`Input GLSL compile error: ${gl.getShaderInfoLog(frag)}`)
 
-    this.program = gl.createProgram()!
-    gl.attachShader(this.program, vert)
-    gl.attachShader(this.program, frag)
-    gl.linkProgram(this.program)
-    if (!gl.getProgramParameter(this.program, gl.LINK_STATUS))
-      throw new Error(`Input GLSL link error: ${gl.getProgramInfoLog(this.program)}`)
+    const program = gl.createProgram()!
+    gl.attachShader(program, vert)
+    gl.attachShader(program, frag)
+    gl.linkProgram(program)
+    gl.deleteShader(vert)
+    gl.deleteShader(frag)
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS))
+      throw new Error(`Input GLSL link error: ${gl.getProgramInfoLog(program)}`)
+    const loc = (name: string) => gl.getUniformLocation(program, name)
+    return { program, src: loc('u_src'), w: loc('u_out_w'), h: loc('u_out_h'),
+      uvX: loc('u_uv_x'), uvY: loc('u_uv_y'), gain: loc('u_gain'), guide: loc('u_guide'), half: loc('u_half') }
 
-    this.uSrc  = gl.getUniformLocation(this.program, 'u_src')!
-    this.uOutW = gl.getUniformLocation(this.program, 'u_out_w')!
-    this.uOutH = gl.getUniformLocation(this.program, 'u_out_h')!
-    this.uUvX  = gl.getUniformLocation(this.program, 'u_uv_x')!
-    this.uUvY  = gl.getUniformLocation(this.program, 'u_uv_y')!
   }
 
   // `orientation`: display transform still to apply (see model/orientation.ts);
@@ -73,7 +75,7 @@ export class InputWebGL implements InputOp {
     this.orientation = orientation ?? null
   }
 
-  run(): void {
+  run(lighting?: DisplayLighting): void {
     if (!this.source) throw new Error('InputWebGL.run() called before setSource()')
 
     const gl = this.gl
@@ -84,19 +86,36 @@ export class InputWebGL implements InputOp {
       this.source as TexImageSource,
     )
 
-    gl.useProgram(this.program)
+    const adjustment = lighting?.prepare(out => this.draw(out as WebGLTensor))
+    this.draw(this.output, adjustment)
+  }
+
+  private draw(out: WebGLTensor, light?: LightAdjustment | null): void {
+    const gl = this.gl
+    const p = light
+      ? this.lit ??= this.compile(inputSrc.replace('// DISPLAY_LIGHTING', '#define DISPLAY_LIGHTING\n' + lightingSrc))
+      : this.raw
+    gl.useProgram(p.program)
+    if (light) {
+      gl.activeTexture(gl.TEXTURE1)
+      gl.bindTexture(gl.TEXTURE_2D, (light.guide as WebGLTensor).texture)
+      gl.uniform1i(p.guide, 1)
+      gl.activeTexture(gl.TEXTURE2)
+      gl.bindTexture(gl.TEXTURE_2D, (light.half as WebGLTensor).texture)
+      gl.uniform1i(p.half, 2)
+      gl.uniform4f(p.gain, light.gain, light.localGain, light.red, light.blue)
+    }
     gl.activeTexture(gl.TEXTURE0)
     gl.bindTexture(gl.TEXTURE_2D, this.srcTex)
-    gl.uniform1i(this.uSrc, 0)
-    gl.uniform1i(this.uOutW, this.output.w)
-    gl.uniform1i(this.uOutH, this.output.h)
+    gl.uniform1i(p.src, 0)
+    gl.uniform1i(p.w, out.w)
+    gl.uniform1i(p.h, out.h)
     const m = orientationUvMatrix(this.orientation)
-    gl.uniform3f(this.uUvX, m[0], m[1], m[2])
-    gl.uniform3f(this.uUvY, m[3], m[4], m[5])
-
+    gl.uniform3f(p.uvX, m[0], m[1], m[2])
+    gl.uniform3f(p.uvY, m[3], m[4], m[5])
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.backend.fbo)
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.output.texture, 0)
-    gl.viewport(0, 0, this.output.texW, this.output.texH)
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out.texture, 0)
+    gl.viewport(0, 0, out.texW, out.texH)
     gl.bindVertexArray(null)
     gl.drawArrays(gl.TRIANGLES, 0, 6)
   }

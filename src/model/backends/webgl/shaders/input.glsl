@@ -15,8 +15,12 @@ uniform vec3      u_uv_y;
 
 out vec4 fragColor;
 
+// DISPLAY_LIGHTING
 void main() {
     // gl_FragCoord is already at the pixel centre (x.5).
     vec3 o = vec3(gl_FragCoord.xy / vec2(float(u_out_w), float(u_out_h)), 1.0);
     fragColor = texture(u_src, vec2(dot(u_uv_x, o), dot(u_uv_y, o)));
+#ifdef DISPLAY_LIGHTING
+    fragColor.rgb = correctLighting(fragColor.rgb, o.xy);
+#endif
 }

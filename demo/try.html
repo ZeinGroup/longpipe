@@ -418,6 +418,10 @@
       </div>
 
       <div class="card">
+        <label class="card-label"><input type="checkbox" id="autoLighting" /> Automatic lighting</label>
+      </div>
+
+      <div class="card">
         <p class="card-label">Touch-up <span style="text-transform:none;font-weight:400;opacity:0.7">(runs in parallel with the background)</span></p>
         <div class="segmented" id="touchupSeg">
           <button data-tu="off" class="active">Off</button>
@@ -670,6 +674,7 @@
         audio: 'drop',
         weightsBaseUrl: '/',   // local demo assets (new tier bins + landmark/touch-up assets)
         dtype: new URLSearchParams(location.search).get('dtype') || undefined,  // ?dtype=f32 to A/B f16 issues
+        lighting: $autoLighting.checked,
         touchup: touchupEnabled ? touchupOpts() : undefined,
         reframe: reframeMode !== 'off' ? reframeOpts() : undefined,
         onError: (err) => setStatus('error: ' + (err.message || err), false),
@@ -968,6 +973,7 @@
     function selectPreset(value, clickedBtn) {
       if (clickedBtn.classList.contains('active')) return
       engine = 'longpipe'
+      $autoLighting.disabled = false
       currentPreset = value
       setActiveModelBtn(clickedBtn)
       buildPipeline()
@@ -976,6 +982,7 @@
     function selectMediaPipe(clickedBtn) {
       if (clickedBtn.classList.contains('active')) return
       engine = 'mediapipe'
+      $autoLighting.disabled = true
       setActiveModelBtn(clickedBtn)
       buildMediaPipe()
     }
@@ -1023,6 +1030,13 @@
       if (pipeline && currentBg === 'color') {
         pipeline.setBackground({ color: $bgColor.value })
       }
+    })
+
+    const $autoLighting = document.getElementById('autoLighting')
+    $autoLighting.addEventListener('change', () => {
+      if (!pipeline || engine !== 'longpipe') return
+      pipeline.setLighting($autoLighting.checked)
+        .catch(err => setStatus('lighting failed: ' + (err.message || err), false))
     })
 
     // ── Touch-up (parallel with backgrounds — one shared encoder pass) ──────
