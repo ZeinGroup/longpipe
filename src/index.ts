@@ -17,3 +17,5 @@ export type {
 // Lower-level types for callers building on top of the backend directly.
 export type { Backend, Tensor, Op, Activation, Conv2dParams, DepthwiseParams, FaceTouchupStyle } from '~/model/backend.ts'
 export { WebGPUBackend } from '~/model/backends/webgpu/index.ts'
+// The WebGPU adapter Longpipe's worker runs on, asked the same way from a page.
+export { requestWebGPUAdapter, describeAdapter } from '~/model/backends/webgpu/adapter.ts'

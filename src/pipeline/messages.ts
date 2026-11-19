@@ -180,6 +180,9 @@ export interface RendererStats {
   inputPath:     string    // 'mstp' | 'rvfc-postmessage'
   outputPath:    string    // 'mstg' | 'transfer-capture' | 'bitmap-shuttle'
   backend:       ActiveBackend
+  // WebGPU: the adapter it runs on, "vendor architecture" as its info gives
+  // them (e.g. 'intel gen-9'); '' on WebGL or when unknown.
+  adapter:       string
 
   // Pipeline latency (ms, rolling mean over ~1 s): an input frame entering the
   // pipeline → its output frame submitted to the output transport. Starts when

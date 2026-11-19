@@ -1,5 +1,6 @@
 import { DisplayInputWebGPU } from "~/model/backends/webgpu/ops/display_input.ts";
 import { LightingWebGPU } from './ops/lighting'
+import { describeAdapter, requestWebGPUAdapter } from "~/model/backends/webgpu/adapter.ts";
 import type { Backend, Dtype, DataView_, RenderTarget } from "~/model/backend.ts";
 import type { WebGPUTensor, WebGPUMLBuffer } from "~/model/backends/webgpu/base_webgpu_op.ts";
 import { float32ArrayToHalf, halfArrayToFloat32 } from "~/utils/fp16.ts";
@@ -56,6 +57,9 @@ const STORAGE = navigator.gpu ? GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
 export interface WebGPUBackendOptions {
   canvas: HTMLCanvasElement | OffscreenCanvas;
   device?: GPUDevice;
+  // The adapter to make the device on (ignored with `device`). Defaults to
+  // requestWebGPUAdapter()'s choice.
+  adapter?: GPUAdapter;
   // Defaults to 'f32'. 'f16' requires the device to expose the `shader-f16`
   // feature; create() throws otherwise.
   dtype?: Dtype;
@@ -78,6 +82,8 @@ export class WebGPUBackend implements Backend {
     readonly device: GPUDevice,
     readonly canvas: HTMLCanvasElement | OffscreenCanvas,
     readonly dtype: Dtype,
+    // The adapter it runs on, "vendor architecture" ('' with a supplied device).
+    readonly adapterInfo: string = "",
   ) {
     this.bytesPerElement = dtype === "f16" ? 2 : 4;
 
@@ -277,22 +283,22 @@ export class WebGPUBackend implements Backend {
   }
 
   static async isAvailable(): Promise<boolean> {
-    if (!navigator.gpu) return false;
-    return (await navigator.gpu.requestAdapter()) !== null;
+    return (await requestWebGPUAdapter()) !== null;
   }
 
+  // Whether the adapter it would run on (requestWebGPUAdapter) has `shader-f16`.
   static async hasF16Support(): Promise<boolean> {
-    if (!navigator.gpu) return false;
-    const adapter = await navigator.gpu.requestAdapter();
-    return adapter ? adapter.features.has("shader-f16") : false;
+    return (await requestWebGPUAdapter())?.features.has("shader-f16") ?? false;
   }
 
   static async create(opts: WebGPUBackendOptions): Promise<WebGPUBackend> {
     const dtype: Dtype = opts.dtype ?? "f32";
     let device = opts.device;
+    let adapterInfo = "";
     if (!device) {
-      const adapter = await navigator.gpu.requestAdapter();
+      const adapter = opts.adapter ?? (await requestWebGPUAdapter());
       if (!adapter) throw new Error("WebGPU adapter not available");
+      adapterInfo = describeAdapter(adapter);
       if (dtype === "f16" && !adapter.features.has("shader-f16"))
         throw new Error("WebGPU dtype='f16' requested but adapter lacks `shader-f16` feature");
       device = await adapter.requestDevice({
@@ -301,7 +307,7 @@ export class WebGPUBackend implements Backend {
     } else if (dtype === "f16" && !device.features.has("shader-f16")) {
       throw new Error("WebGPU dtype='f16' requested but supplied device lacks `shader-f16`");
     }
-    return new WebGPUBackend(device, opts.canvas, dtype);
+    return new WebGPUBackend(device, opts.canvas, dtype, adapterInfo);
   }
 
   // The swapchain texture for the current frame of `target`'s canvas (default

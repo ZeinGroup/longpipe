@@ -3,7 +3,9 @@
 // when the preferred path isn't available.
 //
 // Decision flow:
-//   1. If preference is 'webgpu' or 'auto' AND WebGPUBackend.isAvailable():
+//   1. If preference is 'webgpu' or 'auto' AND there is an adapter
+//      (requestWebGPUAdapter: the default one, or another with shader-f16 when
+//      the default lacks it):
 //      a. If dtype === 'f16' but no shader-f16, downgrade to f32 silently
 //      b. Try WebGPUBackend.create(); on success, return
 //      c. On failure (probe lied / driver quirk), log + fall through to WebGL
@@ -20,6 +22,7 @@
 
 import type { Backend, Dtype } from '~/model/backend.ts'
 import { WebGPUBackend } from '~/model/backends/webgpu/index.ts'
+import { requestWebGPUAdapter } from '~/model/backends/webgpu/adapter.ts'
 import { WebGLBackend }  from '~/model/backends/webgl/index.ts'
 import type { InitData, WorkerErrorEvent } from '../messages'
 import { createLogger } from '../debug'
@@ -61,13 +64,14 @@ export async function setupBackend(
 
   let lastError: unknown = null
 
-  if (wantWebGPU && await WebGPUBackend.isAvailable()) {
-    const dtype: Dtype = (data.dtype === 'f16' && !(await WebGPUBackend.hasF16Support()))
+  const adapter = wantWebGPU ? await requestWebGPUAdapter() : null
+  if (adapter) {
+    const dtype: Dtype = (data.dtype === 'f16' && !adapter.features.has('shader-f16'))
       ? 'f32'
       : data.dtype
     const canvas = canvasFor()
     try {
-      const backend = await WebGPUBackend.create({ canvas, dtype })
+      const backend = await WebGPUBackend.create({ canvas, dtype, adapter })
       // device.lost resolves on driver crash, GPU reset, or destroy().
       // We only surface if NOT triggered by our own destroy() — the
       // 'destroyed' reason indicates intentional teardown.

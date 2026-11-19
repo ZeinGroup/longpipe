@@ -291,6 +291,10 @@ export interface Backend {
   // Numeric precision for activation / weight storage and (on WebGPU) compute.
   readonly dtype: Dtype;
 
+  // WebGPU: the adapter it runs on, "vendor architecture" as its info gives
+  // them ('' when unknown). Absent on WebGL.
+  readonly adapterInfo?: string;
+
   // The canvas the backend renders to. RenderOp reads its dimensions to size
   // the display Input op + compositor output. Both backends require a canvas
   // at create() time per project_backend_canvas_contract.md.

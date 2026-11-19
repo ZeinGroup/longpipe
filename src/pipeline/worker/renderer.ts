@@ -1048,6 +1048,7 @@ export class Renderer {
       inputPath:  this.topology.input,
       outputPath: this.topology.output,
       backend:    this.backendKind === 'webgl' ? 'webgl2' : 'webgpu',
+      adapter:    this.backend.adapterInfo ?? '',
     }
   }
 

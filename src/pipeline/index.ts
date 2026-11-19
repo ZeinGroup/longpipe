@@ -1441,6 +1441,7 @@ export class Pipeline implements PromiseLike<Pipeline> {
       enabled:    worker?.enabled ?? false,
       inputPath:  this.topology.input,
       outputPath: this.output.path,
+      adapter:    worker?.adapter ?? '',
       ...main,
     }
   }
