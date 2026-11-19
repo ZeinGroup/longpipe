@@ -17,6 +17,11 @@ import { CropResampleWebGL } from '~/model/backends/webgl/ops/crop_resample.ts'
 import { LandmarkOverlayWebGL } from '~/model/backends/webgl/ops/landmark_overlay.ts'
 import { FaceTouchupWebGL, FaceTouchupStageWebGL } from '~/model/backends/webgl/ops/face_touchup.ts'
 import { StabilizeWebGL } from '~/model/backends/webgl/ops/stabilize.ts'
+import { AlphaRampWebGL } from '~/model/backends/webgl/ops/alpha_ramp.ts'
+import { GuidedPackWebGL } from '~/model/backends/webgl/ops/guided_pack.ts'
+import { BoxFilterWebGL } from '~/model/backends/webgl/ops/box_filter.ts'
+import { GuidedCoeffsWebGL } from '~/model/backends/webgl/ops/guided_coeffs.ts'
+import { GuidedApplyWebGL } from '~/model/backends/webgl/ops/guided_apply.ts'
 import { BilinearUpsampleWebGL } from '~/model/backends/webgl/ops/bilinear_upsample.ts'
 import { CropWebGL } from '~/model/backends/webgl/ops/crop.ts'
 import { BicubicUpsampleWebGL  } from '~/model/backends/webgl/ops/bicubic_upsample.ts'
@@ -93,6 +98,11 @@ export class WebGLBackend implements Backend {
       CropResample:     (frame, box, params)             => new CropResampleWebGL(this, frame, box, params),
       FaceTouchupStage: (frame, landmarks, box, topo, params) => new FaceTouchupStageWebGL(this, frame, landmarks, box, topo, params),
       Stabilize:        (flow, pred, ref, envPrev, params) => new StabilizeWebGL(this, flow, pred, ref, envPrev, params),
+      AlphaRamp:        (alpha, params)                 => new AlphaRampWebGL(this, alpha, params),
+      GuidedPack:       (guide, alpha)                  => new GuidedPackWebGL(this, guide, alpha),
+      BoxFilter:        (input, params)                 => new BoxFilterWebGL(this, input, params),
+      GuidedCoeffs:     (input, params)                 => new GuidedCoeffsWebGL(this, input, params),
+      GuidedApply:      (image, coeffs, params)         => new GuidedApplyWebGL(this, image, coeffs, params),
       BilinearUpsample: (input, params)                => new BilinearUpsampleWebGL(this, input, params),
       Crop:             (input, params)                => new CropWebGL(this, input, params),
       BicubicUpsample:  (input, params)                => new BicubicUpsampleWebGL(this, input, params),

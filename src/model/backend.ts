@@ -67,6 +67,25 @@ export interface WarpParams {
   flowScale: number;
 }
 
+export interface AlphaRampParams {
+  lo: number;   // alpha at/below this -> 0
+  hi: number;   // alpha at/above this -> 1 (smoothstep in between)
+}
+
+export interface BoxFilterParams {
+  radius:   number;   // 2·radius + 1 taps
+  vertical: boolean;  // false: along x, true: along y
+}
+
+export interface GuidedCoeffsParams {
+  eps: number;        // guided-filter regularizer (luminance variance units)
+}
+
+export interface GuidedApplyParams {
+  lo: number;         // optional smoothstep(lo, hi) on the result; off when hi <= lo
+  hi: number;
+}
+
 export interface StabilizeParams {
   tLo:     number;   // gate opens above this flow magnitude
   tHi:     number;   // gate fully open (trust fresh pred) at/above this
@@ -336,6 +355,18 @@ export interface Backend {
     //   out = vec4((g·pred + (1-g)·ref).x, env, 0, 0)
     // Thread the output back as next frame's envPrev (copyTensor) — .y is env.
     Stabilize:       (flow: Tensor, pred: Tensor, ref: Tensor, envPrev: Tensor, params: StabilizeParams) => Op;
+
+    // Display-side matte ops (elementwise, 4-channel, same shape in and out).
+    // AlphaRamp: smoothstep(lo, hi, alpha.x) — a tighter blend edge.
+    AlphaRamp:       (alpha: Tensor, params: AlphaRampParams) => Op;
+    // Guided upsampler (fast guided filter): coefficients at the model's grid from
+    // the guide (the camera frame there) and the matte, boxed, then applied with
+    // the full-resolution camera luminance. GuidedApply's output is the display
+    // alpha at the image's size.
+    GuidedPack:      (guide: Tensor, alpha: Tensor) => Op;
+    BoxFilter:       (input: Tensor, params: BoxFilterParams) => Op;
+    GuidedCoeffs:    (input: Tensor, params: GuidedCoeffsParams) => Op;
+    GuidedApply:     (image: Tensor, coeffs: Tensor, params: GuidedApplyParams) => Op;
 
     // Fused ConvGRU (production config c_up=2, recurrent=1). GatesFused emits
     // (z, r); CandUpdateFused consumes it + does candidate/update/output.

@@ -1,4 +1,4 @@
-import { runBatched, type Backend, type Tensor, type InputOp, type ImageSource, type RenderTarget } from '~/model/backend.ts'
+import { runBatched, type Backend, type Tensor, type InputOp, type ImageSource, type RenderTarget, type AlphaRampParams } from '~/model/backend.ts'
 import type { Orientation } from '~/model/orientation.ts'
 import { BilinearUpscaler } from '~/model/effects/upscale_bilinear.ts'
 import { BicubicUpscaler  } from '~/model/effects/upscale_bicubic.ts'
@@ -6,7 +6,10 @@ import { CompositorSolid } from '~/model/effects/compositor_solid.ts'
 import { CompositorImage } from '~/model/effects/compositor_image.ts'
 import { CompositorBlur }  from '~/model/effects/compositor_blur.ts'
 
-export type UpscalerMode = 'bilinear' | 'bicubic'
+// 'guided': a fast guided filter (He et al. 2015, Wu et al. 2018) — the matte's local
+// linear model in the camera's luminance, fitted at the model's grid and applied
+// with the full-resolution image, so edges follow the camera's edges.
+export type UpscalerMode = 'bilinear' | 'bicubic' | 'guided'
 
 export type BackgroundConfig =
   | { mode: 'solid'; color: [number, number, number] }
@@ -38,6 +41,9 @@ export interface EffectStage {
 export interface RenderOptions {
   upscaler:   UpscalerMode
   background: BackgroundConfig
+  // Optional smoothstep(lo, hi) on the display alpha, after the upscale (the
+  // network's alpha and any temporal history stay untouched). Off when absent.
+  alphaRamp?: AlphaRampParams
 }
 
 interface UpscalerHandle { readonly output: Tensor; run(): void }
@@ -71,6 +77,7 @@ export class RenderOp<N extends NetworkLike = NetworkLike> {
 
   // Stored config — applied lazily when the compositor is (re)built.
   private upscalerMode: UpscalerMode      = 'bilinear'
+  private alphaRamp:    AlphaRampParams | null = null
   // The 'main' target's effect config; runDisplay()/run() composite with it.
   // Preview config is passed explicitly by the renderer to compositeTo().
   private bgConfig:     BackgroundConfig  = { mode: 'solid', color: [0, 0, 0] }
@@ -122,6 +129,7 @@ export class RenderOp<N extends NetworkLike = NetworkLike> {
     this.network      = network
     this.networkInput = networkInput
     this.upscalerMode = options.upscaler
+    this.alphaRamp    = options.alphaRamp ?? null
     this.bgConfig     = options.background
     this.upscaler     = this.makeUpscaler()
     this.rebuildView()          // viewAlpha binds upscaler.output
@@ -326,9 +334,47 @@ export class RenderOp<N extends NetworkLike = NetworkLike> {
   private makeUpscaler(): UpscalerHandle {
     if (!this.network) throw new Error('makeUpscaler called with no network')
     const { backend, network, image } = this
-    return this.upscalerMode === 'bicubic'
+    if (this.upscalerMode === 'guided') return this.makeGuidedUpscaler()
+    const up: UpscalerHandle = this.upscalerMode === 'bicubic'
       ? new BicubicUpscaler(backend,  network.output, image.h, image.w)
       : new BilinearUpscaler(backend, network.output, image.h, image.w)
+    if (!this.alphaRamp) return up
+    // The ramp rides the upscale: every caller that refreshes the display alpha
+    // (runModel, applyAlpha) gets it, and the compositors bind its output.
+    const ramp = backend.ops.AlphaRamp(up.output, this.alphaRamp)
+    return { output: ramp.output, run: () => { up.run(); ramp.run() } }
+  }
+
+  // Guided upsampler: coefficients at the network's grid (guide = the network input,
+  // i.e. the camera frame resampled there; matte = network.output, which on flow
+  // tiers holds the stabilized alpha), boxed, applied with the full-res display
+  // image. The radius scales with the grid (4 px at medium's 320 rows); eps in
+  // luminance-variance units. The optional ramp is folded into the last pass.
+  private makeGuidedUpscaler(): UpscalerHandle {
+    const { backend, network, networkInput, image } = this
+    if (!network || !networkInput) throw new Error('makeGuidedUpscaler called with no network')
+    const radius = Math.max(1, Math.round(network.output.h / 80))
+    const pack  = backend.ops.GuidedPack(networkInput.output, network.output)
+    const box = (t: Tensor) => {
+      const h = backend.ops.BoxFilter(t, { radius, vertical: false })
+      const v = backend.ops.BoxFilter(h.output, { radius, vertical: true })
+      return [h, v]
+    }
+    const [m1, m2] = box(pack.output)
+    const coeffs = backend.ops.GuidedCoeffs(m2.output, { eps: 1e-3 })
+    const [c1, c2] = box(coeffs.output)
+    const ramp = this.alphaRamp ?? { lo: 0, hi: 0 }
+    const apply = backend.ops.GuidedApply(image, c2.output, ramp)
+    const steps = [pack, m1, m2, coeffs, c1, c2, apply]
+    return {
+      output: apply.output,
+      run: () => {
+        // The guide must be THIS frame's image: the display input is otherwise
+        // refreshed only at composite time, after the model.
+        this.refreshDisplayInput()
+        for (const s of steps) s.run()
+      },
+    }
   }
 
   // Build a compositor bound to `target` for `spec`. Passthrough needs only the

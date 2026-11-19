@@ -17,6 +17,11 @@ import { CropResampleWebGPU } from "~/model/backends/webgpu/ops/crop_resample.ts
 import { LandmarkOverlayWebGPU } from "~/model/backends/webgpu/ops/landmark_overlay.ts";
 import { FaceTouchupWebGPU, FaceTouchupStageWebGPU } from "~/model/backends/webgpu/ops/face_touchup.ts";
 import { StabilizeWebGPU } from "~/model/backends/webgpu/ops/stabilize.ts";
+import { AlphaRampWebGPU } from "~/model/backends/webgpu/ops/alpha_ramp.ts";
+import { GuidedPackWebGPU } from "~/model/backends/webgpu/ops/guided_pack.ts";
+import { BoxFilterWebGPU } from "~/model/backends/webgpu/ops/box_filter.ts";
+import { GuidedCoeffsWebGPU } from "~/model/backends/webgpu/ops/guided_coeffs.ts";
+import { GuidedApplyWebGPU } from "~/model/backends/webgpu/ops/guided_apply.ts";
 import { BilinearUpsampleWebGPU } from "~/model/backends/webgpu/ops/bilinear_upsample.ts";
 import { CropWebGPU } from "~/model/backends/webgpu/ops/crop.ts";
 import { BicubicUpsampleWebGPU  } from "~/model/backends/webgpu/ops/bicubic_upsample.ts";
@@ -97,6 +102,11 @@ export class WebGPUBackend implements Backend {
       CropResample:     (frame, box, params)             => new CropResampleWebGPU(this, frame, box, params),
       FaceTouchupStage: (frame, landmarks, box, topo, params) => new FaceTouchupStageWebGPU(this, frame, landmarks, box, topo, params),
       Stabilize:        (flow, pred, ref, envPrev, params) => new StabilizeWebGPU(this, flow, pred, ref, envPrev, params),
+      AlphaRamp:        (alpha, params)                 => new AlphaRampWebGPU(this, alpha, params),
+      GuidedPack:       (guide, alpha)                  => new GuidedPackWebGPU(this, guide, alpha),
+      BoxFilter:        (input, params)                 => new BoxFilterWebGPU(this, input, params),
+      GuidedCoeffs:     (input, params)                 => new GuidedCoeffsWebGPU(this, input, params),
+      GuidedApply:      (image, coeffs, params)         => new GuidedApplyWebGPU(this, image, coeffs, params),
       BilinearUpsample: (input, params)                 => new BilinearUpsampleWebGPU(this, input, params),
       Crop:             (input, params)                 => new CropWebGPU(this, input, params),
       BicubicUpsample:  (input, params)                 => new BicubicUpsampleWebGPU(this, input, params),
