@@ -355,8 +355,8 @@ export class RenderOp<N extends NetworkLike = NetworkLike> {
     return { output: ramp.output, run: () => { up.run(); ramp.run() } }
   }
 
-  // Guided upsampler: coefficients at the network's grid (guide = the network input,
-  // i.e. the camera frame resampled there; matte = network.output, which on flow
+  // Guided upsampler: coefficients at the network's grid (guide = the display image
+  // resampled there; matte = network.output, which on flow
   // tiers holds the stabilized alpha), boxed, applied with the full-res display
   // image. The radius scales with the grid (4 px at medium's 320 rows); eps in
   // luminance-variance units. The optional ramp is folded into the last pass.
@@ -364,7 +364,11 @@ export class RenderOp<N extends NetworkLike = NetworkLike> {
     const { backend, network, networkInput, image } = this
     if (!network || !networkInput) throw new Error('makeGuidedUpscaler called with no network')
     const radius = Math.max(1, Math.round(network.output.h / 80))
-    const pack  = backend.ops.GuidedPack(networkInput.output, network.output)
+    // The low-res guide is the DISPLAY image brought to the network grid, not the
+    // network input: both guides must be the same picture, and the display image
+    // may be corrected (automatic lighting) while the network sees the raw camera.
+    const guideLow = backend.ops.BilinearUpsample(image, { outH: network.output.h, outW: network.output.w })
+    const pack  = backend.ops.GuidedPack(guideLow.output, network.output)
     const box = (t: Tensor) => {
       const h = backend.ops.BoxFilter(t, { radius, vertical: false })
       const v = backend.ops.BoxFilter(h.output, { radius, vertical: true })
@@ -375,7 +379,7 @@ export class RenderOp<N extends NetworkLike = NetworkLike> {
     const [c1, c2] = box(coeffs.output)
     const ramp = this.alphaRamp ?? { lo: 0, hi: 0 }
     const apply = backend.ops.GuidedApply(image, c2.output, ramp)
-    const steps = [pack, m1, m2, coeffs, c1, c2, apply]
+    const steps = [guideLow, pack, m1, m2, coeffs, c1, c2, apply]
     return {
       output: apply.output,
       run: () => {
