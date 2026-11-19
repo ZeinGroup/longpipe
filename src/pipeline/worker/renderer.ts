@@ -424,9 +424,14 @@ export class Renderer {
     const now = performance.now()
 
     const hasNet        = this.renderOp.hasNetwork()
-    const faceActive    = this.enabled && hasNet && this.faceChain !== null
     const mainEffect    = this.enabled && hasNet && this.currentBackground.kind !== 'none'
-    const needsModel    = mainEffect || faceActive   // face rides the encoder → needs the matting pass
+    // The face chain serves touch-up / reframe (which need the model on their own)
+    // and lighting's face metering, which only rides a model run a background
+    // effect already pays for: lighting alone never wakes the network.
+    const faceForEffects  = this.faceChain !== null && (this.faceCfg !== null || this.reframeCfg !== null)
+    const faceForLighting = this.faceChain !== null && this.lightingEnabled && mainEffect
+    const faceActive    = this.enabled && hasNet && (faceForEffects || faceForLighting)
+    const needsModel    = mainEffect || (faceActive && faceForEffects)   // face rides the encoder → needs the matting pass
     const previewTick   = this.isPreviewTick(now)
     const previewEffect = previewTick && hasNet && this.previewBg !== null && this.previewBg.kind !== 'none'
 
@@ -714,8 +719,14 @@ export class Renderer {
   }
 
   setLighting(on: boolean): void {
-    if (on !== this.lightingEnabled) this.resetLighting()
+    if (on === this.lightingEnabled) return
+    this.resetLighting()
     this.lightingEnabled = on
+    // Lighting meters cheeks and forehead from the face head's keypoints: build
+    // the detection half of the face chain the first time it is needed. It is
+    // kept when lighting goes off (it then simply doesn't run): rebuilding on
+    // every toggle would upload the face head and its tensors again each time.
+    if (on && this.preset && !this.faceChain) this.buildFaceChain()
   }
 
   setEnabled(on: boolean): void {
@@ -909,8 +920,10 @@ export class Renderer {
     this.renderOp.setViewTransform(null)
     const cfg = this.faceCfg
     const w = this.lastTierWeights
-    if ((!cfg && !this.reframeCfg) || !this.tier || !this.tierInput || !this.preset) return
+    if ((!cfg && !this.reframeCfg && !this.lightingEnabled) || !this.tier || !this.tierInput || !this.preset) return
     if (!w?.face) {
+      // Lighting alone falls back to the matte interior: nothing to say.
+      if (!cfg && !this.reframeCfg) return
       // Loud, not silent: a missing face blob means the tier .bin predates the
       // face-head export — nothing face-driven can run. (Cost a debugging marathon once.)
       console.warn(`[longpipe/renderer] face effects configured but the '${this.preset.model}' weights have no face blob — disabled. Re-export the tier with a face-trained checkpoint.`)
