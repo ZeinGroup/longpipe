@@ -61,10 +61,10 @@ export class AutoLighting implements DisplayLighting {
       // Let the renderer submit its batch before recording the read. One
       // outstanding sample, and a late completion cannot undo a camera reset.
       this.pending = true
-      const epoch = this.epoch
+      const epoch = this.epoch, matte = this.useMatte
       void Promise.resolve().then(() => this.backend.readbackDeferred
         ? this.backend.readbackDeferred(meter.output) : this.backend.readback(meter.output))
-        .then(tiles => { if (epoch === this.epoch) this.controller.observe(tiles) })
+        .then(tiles => { if (epoch === this.epoch) this.controller.observe(tiles, matte) })
         .catch(() => { /* context loss is handled by the worker */ })
         .finally(() => { this.pending = false })
     }

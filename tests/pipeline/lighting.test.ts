@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Backend } from '~/model/backend'
 import { AutoLighting } from '~/model/effects/auto_lighting'
-import { LightingController, lightingCurve, meterLevels } from '~/model/effects/lighting'
+import { GLOBAL_MAX, LOCAL_MAX, LightingController, SUBJECT_TARGET, lightingCurve, meterLevels } from '~/model/effects/lighting'
 
 // The GPU's tile layout. Make each group independently controllable so tests
 // distinguish subject metering from an incidental change in the whole scene.
@@ -27,15 +27,50 @@ describe('automatic lighting meter', () => {
     const clean = meterLevels(base)
     for (let i = 0; i < 12 * 12; i += 12) base[i] = -0.1 * 36
     expect(meterLevels(base).ev).toBeCloseTo(clean.ev, 6)
-    const brightest = meterLevels(tiles(-2))
-    const body = meterLevels(tiles(-2, -3.5, -5, 10))
-    const tinyFace = meterLevels(tiles(-2, -3.5, -5, 10, 0.01))
-    const face = meterLevels(tiles(-2, -3.5, -5, 10, 2))
-    expect(body.ev).toBeGreaterThan(brightest.ev)
-    expect(tinyFace.ev).toBeGreaterThan(body.ev)
-    expect(tinyFace.ev).toBeLessThan(face.ev)
-    expect(face.local).toBeGreaterThan(0)
-    expect(face.local).toBeLessThanOrEqual(0.48)
+    // A dim room: a person brighter than the room asks for less over the whole
+    // picture (no overshoot), a darker person for more fill inside the matte. The face
+    // does not move the level (the person's region does); the interior blends in by
+    // its mass.
+    const room = meterLevels(tiles(-4.25))
+    const bright = meterLevels(tiles(-4.25, -3.25, -2.75, 10))
+    expect(room.ev).toBeGreaterThan(bright.ev)
+    expect(meterLevels(tiles(-4.25, -3.25, -2.75, 10, 2))).toEqual(bright)
+    const dark = meterLevels(tiles(-4.25, -5.5, -5.5, 10))
+    const thin = meterLevels(tiles(-4.25, -5.5, -5.5, 0.5))
+    expect(dark.local).toBeGreaterThanOrEqual(bright.local)
+    expect(dark.local).toBeLessThanOrEqual(LOCAL_MAX)
+    expect(thin.local).toBeLessThan(dark.local)
+  })
+  // A reference video-call app in a dim room: subject 0.044 linear, room around 0.016,
+  // +1.8 EV over the whole picture and about +0.5 EV more inside the person.
+  it('lands the subject near mid grey in a dark room, like the reference', () => {
+    const subject = Math.log2(0.044)
+    const lv = meterLevels(tiles(Math.log2(0.016), subject, subject, 10, 2))
+    expect(lv.ev).toBeGreaterThan(1.7)
+    expect(lv.ev).toBeLessThanOrEqual(GLOBAL_MAX)
+    expect(lv.local).toBeGreaterThan(0.4)
+    expect(lv.local).toBeLessThanOrEqual(LOCAL_MAX)
+    const g = 2 ** (lv.ev + lv.local), s = 0.044
+    const lifted = g * s / (1 + (g - 1) * s)   // the reference: 0.044 -> 0.186
+    expect(lifted).toBeGreaterThan(SUBJECT_TARGET - 0.01)
+    expect(lifted).toBeLessThan(0.2)
+    // with no matte the whole correction is global, up to the same ceiling
+    const flat = meterLevels(tiles(Math.log2(0.016), subject, subject, 10, 2), false)
+    expect(flat.local).toBe(0)
+    expect(flat.ev).toBeCloseTo(GLOBAL_MAX, 6)
+  })
+  it('falls smoothly to identity as the room brightens, whatever the face', () => {
+    let prev = Infinity
+    for (let scene = -7; scene <= -2; scene += 0.05) {
+      const lv = meterLevels(tiles(scene, scene + 1, scene + 1, 10, 2))
+      const total = lv.ev + lv.local
+      expect(total).toBeLessThanOrEqual(prev + 1e-9)
+      if (prev !== Infinity) expect(prev - total).toBeLessThan(0.12)
+      prev = total
+    }
+    expect(prev).toBe(0)
+    // a darker complexion in a well-lit room is left alone
+    expect(meterLevels(tiles(-2.5, -4.5, -4.5, 10, 2))).toEqual(unity)
   })
   it('bounds white balance, fades weak evidence and preserves it at unity exposure', () => {
     const measure = (scene: number, mass: number) => {
@@ -43,7 +78,7 @@ describe('automatic lighting meter', () => {
       for (let i = 0; i < t.length; i += 12) t.set([mass, -0.6 * mass, 0.6 * mass], i + 7)
       return meterLevels(t)
     }
-    expect(measure(-8, 30)).toEqual({ ev: 1.65, local: 0, red: -0.22, blue: 0.22 })
+    expect(measure(-8, 30)).toEqual({ ev: GLOBAL_MAX, local: 0, red: -0.22, blue: 0.22 })
     expect(Math.abs(measure(-8, 0.01).red)).toBeLessThan(0.005)
     expect(measure(-2, 30).red).toBe(0)
   })
@@ -62,8 +97,17 @@ describe('linear light tone curve', () => {
       expect(out).toBeGreaterThan(prev)
       expect(out).toBeGreaterThanOrEqual(v - 1e-12)
       expect(out).toBeLessThanOrEqual(1)
-      if (v <= 0.002) expect(out).toBe(v)
+      if (v <= 0.0004) expect(out).toBe(v)
       prev = out
+    }
+    // Above the toe a grey follows the reference's measured map at its gain
+    // (g = 3.48): off code -> on code, within 8 levels at each of the 11 points.
+    const reference = [[24, 44], [40, 70], [56, 101], [72, 122], [88, 139], [104, 160], [120, 180], [136, 191], [152, 203], [168, 212], [184, 222]]
+    const dec = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+    const enc = (y: number) => (y <= 0.0031308 ? 12.92 * y : 1.055 * y ** (1 / 2.4) - 0.055)
+    for (const [off, on] of reference) {
+      const y = dec(off / 255)
+      expect(Math.abs(enc(lightingCurve([y, y, y], 3.48, 1, 1)[1]) * 255 - on)).toBeLessThan(8)
     }
     const [r, g, b] = lightingCurve([1, 0.8, 0.7], 3, 2 ** 0.22, 1)
     expect(r).toBeLessThanOrEqual(1)
@@ -72,20 +116,22 @@ describe('linear light tone curve', () => {
 })
 
 describe('lighting controller', () => {
-  it('slews in stops with elapsed time, without overshoot at different frame rates', () => {
+  it('reaches a new target within a second of switching on, without overshoot at different frame rates', () => {
     for (const dt of [16, 67, 1000]) {
       const c = new LightingController()
       const t = tiles(-7)
       for (let i = 0; i < t.length; i += 12) t.set([30, 15, -15], i + 7)
       c.observe(t)
+      const target = meterLevels(t)
       let prev = c.step(0)
       for (let now = dt; now < 5000; now += dt) {
         const v = c.step(now)
         expect(v.ev - prev.ev).toBeGreaterThanOrEqual(0)
-        expect(v.ev - prev.ev).toBeLessThanOrEqual(0.85 * dt / 1000 + 1e-10)
-        expect(v.red - prev.red).toBeLessThanOrEqual(0.12 * dt / 1000 + 1e-10)
-        expect(v.ev).toBeLessThanOrEqual(1.65)
+        expect(v.ev - prev.ev).toBeLessThanOrEqual(4 * dt / 1000 + 1e-10)
+        expect(v.red - prev.red).toBeLessThanOrEqual(0.6 * dt / 1000 + 1e-10)
+        expect(v.ev).toBeLessThanOrEqual(target.ev + 1e-12)
         expect(v.blue).toBeGreaterThanOrEqual(-0.22)
+        if (now >= 1000) expect(v.ev).toBeGreaterThan(0.9 * target.ev)
         prev = v
       }
     }
@@ -98,23 +144,36 @@ describe('lighting controller', () => {
     const held = c.step(now)
     c.observe(tiles(-3.99))
     expect(c.step(now + 40)).toEqual(held)
-    c.observe(tiles(-3))
+    c.observe(tiles(-2.5))   // the room is lit now: back to identity, slowly
     const released = c.step(now + 80)
     expect(held.ev - released.ev).toBeGreaterThan(0)
     expect(held.ev - released.ev).toBeLessThanOrEqual(0.85 * 0.55 * 0.04)
     for (now += 120; now < 30000; now += 40) c.step(now)
     expect(c.step(now)).toEqual(unity)
   })
-  it('discards old gains after a camera switch, luminance cut or same-luma colour cut', () => {
-    for (const change of ['camera', 'light', 'colour']) {
+  it('discards old gains after a camera switch', () => {
+    const c = new LightingController()
+    c.observe(tiles(-6)); c.step(0)
+    expect(c.step(200).ev).toBeGreaterThan(0)
+    c.reset()
+    expect(c.step(220)).toEqual(unity)
+  })
+  it('keeps the gains through a scene cut, then reaches the new scene within a second', () => {
+    for (const change of ['light', 'colour']) {
       const c = new LightingController()
-      c.observe(tiles(-6)); c.step(0)
-      expect(c.step(200).ev).toBeGreaterThan(0)
+      c.observe(tiles(-6))
+      let now = 0
+      for (; now < 3000; now += 40) c.step(now)
+      const before = c.step(now)
       const next = tiles(change === 'light' ? -2 : -6)
       if (change === 'colour') for (let i = 10; i < next.length; i += 12) next[i] = 0.5
-      if (change === 'camera') c.reset()
-      else c.observe(next)
-      expect(c.step(220)).toEqual(unity)
+      c.observe(next)
+      const after = c.step(now + 40)
+      expect(Math.abs(after.ev - before.ev)).toBeLessThanOrEqual(4 * 0.04 + 1e-9)   // no one-frame jump
+      for (now += 40; now < 4100; now += 40) c.step(now)
+      const settled = c.step(now)
+      if (change === 'light') expect(settled).toEqual(unity)
+      else expect(settled.ev).toBeCloseTo(before.ev, 1)
     }
   })
 })

@@ -90,6 +90,36 @@ describe.each(BACKENDS_DTYPE)('automatic lighting ($name)', ({ name, create }) =
     } finally { src.close(); b.destroy() }
   })
 
+  it('smooths flat shadow luma at a strong gain, keeps the edge and the brights', async ctx => {
+    if (await unsupported()) return ctx.skip()
+    const b = await create()
+    const pixels = new Uint8ClampedArray(8 * 8 * 4)
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      const v = x > 3 ? 200 : (x + y) % 2 ? 46 : 34
+      pixels.set([v, v, v, 255], (y * 8 + x) * 4)
+    }
+    const src = await createImageBitmap(new ImageData(pixels, 8, 8))
+    try {
+      const input = b.ops.DisplayInput(8, 8)
+      input.setSource(src)
+      const guide = b.tensor(1, 1, 4)
+      const render = async (size: number) => {
+        const reference = b.tensor(size, size, 4)
+        input.run({ prepare(sample) {
+          sample(reference)
+          return { half: reference, guide, gain: 3.48, localGain: 1, red: 1, blue: 1 }
+        } })
+        return b.readback(input.output)
+      }
+      // A full-size reference equals the original at every pixel: nothing to smooth.
+      const plain = await render(8), filtered = await render(4)
+      const at = (v: Float32Array, x: number, y: number) => v[(y * 8 + x) * 4 + 1]
+      expect(Math.abs(at(filtered, 1, 1) - at(filtered, 2, 1))).toBeLessThan(0.6 * Math.abs(at(plain, 1, 1) - at(plain, 2, 1)))
+      expect(at(filtered, 4, 2)).toBeCloseTo(at(plain, 4, 2), 3)   // the bright side of the edge
+      expect(at(filtered, 6, 3)).toBeCloseTo(at(plain, 6, 3), 3)
+    } finally { src.close(); b.destroy() }
+  })
+
   it('normalizes limited and full-range YUV before the linear lift', async ctx => {
     if (await unsupported()) return ctx.skip()
     const b = await create()
