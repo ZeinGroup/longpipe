@@ -180,6 +180,28 @@ describe.each(BACKENDS)('camera rotation (%s)', (backend) => {
   })
 })
 
+// The generator path posts a copy of each rendered frame in memory (outputReadback,
+// on by default): a rotated and mirrored source comes out upright, unmirrored, with
+// its patch colours within 2 levels.
+describe.each(BACKENDS)('output copied to memory (%s)', (backend) => {
+  it('keeps the orientation of a rotated, mirrored source and the colour of its patches', async (ctx) => {
+    if (!nativeRotationSupported()) ctx.skip()   // reason: VideoFrameInit.rotation unsupported in this browser
+    TUNING.forceTopology = { input: 'mstp', output: 'mstg' }
+    const state = { o: { rotation: 90, flip: true } as Orientation, native: true }
+    const cam = rotatedCamera(state)
+    cleanup.push(() => cam.stop())
+    const { pipeline, log, skipped } = await startPipeline(cam.stream, backend, 'none')
+    if (skipped) { console.warn(`skip: ${skipped}`); ctx.skip() }
+    await sleep(800)
+    const s = await sampleOutput(pipeline.stream.getVideoTracks()[0])
+    expectUpright(s, true, 'rot90+flip, copied')
+    for (const [got, want, what] of [[s.tl, RED, 'top-left'], [s.tr, GREEN, 'top-right'], [s.bottom, BLUE, 'bottom']] as const)
+      expect(near(got, want, 2), `${what} ${got} should be ${want} within 2`).toBe(true)
+    expect((await pipeline.getStats()).outputReadbackMs).toBeGreaterThan(0)
+    expect(log.errors).toEqual([])
+  })
+})
+
 describe('camera rotation with face touch-up geometry inputs', () => {
   it('portrait output with background none (passthrough path) is upright too', async (ctx) => {
     TUNING.forceTopology = { input: 'rvfc-postmessage', output: 'bitmap-shuttle' }
