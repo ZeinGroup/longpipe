@@ -1,7 +1,8 @@
 #version 300 es
 // Flow-gated temporal stabilizer. Per pixel:
 //   env = max(|flow.xy|, release·envPrev.y)   peak-hold
-//   g   = max(clamp((env - tLo)/(tHi - tLo), 0, 1), leak)
+//   g   = max(clamp((env - tLo)/(tHi - tLo), 0, 1), gDiv, gChg, leak)
+//   gChg = clamp((|pred - ref| - tChg)/chgScale, 0, 1), off when chgScale is 0
 //   out = vec4((g·pred + (1-g)·ref).x, env, 0, 0)
 
 precision highp float;
@@ -19,6 +20,8 @@ uniform float u_leak;
 uniform float u_release;
 uniform float u_t_div;
 uniform float u_div_scale;
+uniform float u_t_chg;
+uniform float u_chg_scale;
 uniform int   u_step_x;
 uniform int   u_step_y;
 
@@ -43,10 +46,10 @@ void main() {
 
     float gMag = clamp((env - u_t_lo) / max(u_t_hi - u_t_lo, 1e-3), 0.0, 1.0);
     float gDiv = clamp((divg - u_t_div) / max(u_div_scale, 1e-3), 0.0, 1.0);
-    float g = max(max(gMag, gDiv), u_leak);
-
     float pred = texelFetch(u_pred, ivec2(x, y), 0).x;
     float refv = texelFetch(u_ref,  ivec2(x, y), 0).x;
+    float gChg = u_chg_scale > 0.0 ? clamp((abs(pred - refv) - u_t_chg) / u_chg_scale, 0.0, 1.0) : 0.0;
+    float g = max(max(max(gMag, gDiv), gChg), u_leak);
     float stab = g * pred + (1.0 - g) * refv;
 
     fragColor = vec4(stab, env, 0.0, 0.0);

@@ -3,7 +3,8 @@ enable f16;
 // Flow-gated temporal stabilizer (f16 storage, f32 gate math). Per pixel:
 //   env = max(|flow.xy|, release·envPrev.y)      peak-hold (fast attack, slow release)
 //   div = |∂fx/∂x + ∂fy/∂y|                       flow divergence (occlusion seam)
-//   g   = max(clamp((env-tLo)/(tHi-tLo),0,1), clamp((div-tDiv)/divScale,0,1), leak)
+//   g   = max(clamp((env-tLo)/(tHi-tLo),0,1), clamp((div-tDiv)/divScale,0,1), gChg, leak)
+//   gChg = clamp((|pred-ref|-tChg)/chgScale,0,1), the optional change gate (off at chgScale 0)
 //   out = vec4((g·pred + (1-g)·ref).x, env, 0, 0)
 // The divergence term opens the gate at occlusion/disocclusion boundaries (where
 // the flow tears but the revealed-background magnitude is ~0). Finite-difference
@@ -20,6 +21,8 @@ struct Params {
     div_scale: f32,
     step_x   : u32,
     step_y   : u32,
+    t_chg    : f32,
+    chg_scale: f32,
 }
 
 @group(0) @binding(0) var<storage, read>       flow_buf     : array<vec4<f16>>;
@@ -51,10 +54,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let g_mag = clamp((env - params.t_lo) / max(params.t_hi - params.t_lo, 1e-3), 0.0, 1.0);
     let g_div = clamp((divg - params.t_div) / max(params.div_scale, 1e-3), 0.0, 1.0);
-    let g = max(max(g_mag, g_div), params.leak);
-
     let pred = f32(pred_buf[idx].x);
     let refv = f32(ref_buf[idx].x);
+    // Change gate (off when chg_scale is 0): trust the fresh matte where it disagrees with the warped history.
+    let g_chg = select(0.0, clamp((abs(pred - refv) - params.t_chg) / max(params.chg_scale, 1e-3), 0.0, 1.0), params.chg_scale > 0.0);
+    let g = max(max(max(g_mag, g_div), g_chg), params.leak);
     let stab = g * pred + (1.0 - g) * refv;
 
     output_buf[idx] = vec4<f16>(f16(stab), f16(env), 0.0h, 0.0h);

@@ -78,6 +78,13 @@ export interface StabilizeParams {
   // that spans ~1 base/4 pixel (stepX/stepY ≈ canvas/flow resolution ratio).
   tDiv:     number;  // divergence above which the seam gate starts opening
   divScale: number;  // soft-gate width for the divergence term
+  // Change gate (optional; off when chgScale is 0 or absent): the gate ALSO opens
+  // where the fresh matte itself disagrees with the warped history — a moving
+  // hand whose flow was misestimated, or a newly opened gap between fingers that
+  // no warp can reveal. |pred − ref| above tChg starts trusting the fresh matte,
+  // fully at tChg + chgScale.
+  tChg?:     number;
+  chgScale?: number;
   stepX:    number;  // finite-difference step (px) in x / y
   stepY:    number;
 }

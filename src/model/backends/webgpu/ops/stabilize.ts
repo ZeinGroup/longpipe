@@ -24,8 +24,8 @@ export class StabilizeWebGPU extends WebGPUOp {
     this.inputs = [flow, pred, ref, envPrev];
 
     this.createUniform("params", "Params");
-    // { h,w:u32, t_lo,t_hi,leak,release,t_div,div_scale:f32, step_x,step_y:u32 }
-    const u = new Uint32Array(10);
+    // { h,w:u32, t_lo,t_hi,leak,release,t_div,div_scale:f32, step_x,step_y:u32, t_chg,chg_scale:f32 }
+    const u = new Uint32Array(12);
     u[0] = flow.h;
     u[1] = flow.w;
     const fv = new Float32Array(u.buffer);
@@ -37,6 +37,8 @@ export class StabilizeWebGPU extends WebGPUOp {
     fv[7] = params.divScale;
     u[8]  = params.stepX;
     u[9]  = params.stepY;
+    fv[10] = params.tChg ?? 0;
+    fv[11] = params.chgScale ?? 0;
     this.setUniform("params", u);
 
     this.defaultSetup();

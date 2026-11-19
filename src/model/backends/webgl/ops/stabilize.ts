@@ -32,6 +32,7 @@ export class StabilizeWebGL extends WebGLOp {
     this.uniformFloats = {
       u_t_lo: params.tLo, u_t_hi: params.tHi, u_leak: params.leak, u_release: params.release,
       u_t_div: params.tDiv, u_div_scale: params.divScale,
+      u_t_chg: params.tChg ?? 0, u_chg_scale: params.chgScale ?? 0,
     }
 
     this.defaultSetup()
