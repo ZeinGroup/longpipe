@@ -54,6 +54,7 @@ describe.each(BACKENDS_DTYPE)('automatic lighting ($name)', ({ name, create }) =
       expect(at(10, 28, 0)).toBe(0)
       expect(at(11, 28, 0)).toBe(0)
       expect(at(24, 28, 1)).toBe(1)
+      expect(at(90, 50, 0)).toBeCloseTo(0.85, 2)   // the body takes 85% of the fill, the face all of it
       expect(at(38, 33, 2)).toBeGreaterThan(0.8)
       expect(at(47, 14, 2)).toBeGreaterThan(0.8)
       expect(at(38, 23, 2)).toBe(0)

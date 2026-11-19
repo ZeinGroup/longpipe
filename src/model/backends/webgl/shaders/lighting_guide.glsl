@@ -42,5 +42,5 @@ void main() {
                          disk((uv-(lm.xy+rm.xy)*0.5)*grid/span,vec2(0),0.5));
     float face = conf * max(cheeks,forehead) * (1.0-excluded);
     float broad = conf * (1.0-smoothstep(0.42,1.22,length(p-vec2(0,0.28))));
-    result = vec4(person*(0.65+0.35*broad), person, person*face, 0);
+    result = vec4(person*(0.85+0.15*broad), person, person*face, 0);
 }
