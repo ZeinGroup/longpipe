@@ -121,6 +121,43 @@ describe.each(BACKENDS_DTYPE)('automatic lighting ($name)', ({ name, create }) =
     } finally { src.close(); b.destroy() }
   })
 
+  // Webcam colour blotches (4:2:0 chroma, 8x8-block compression) at a strong lift: the
+  // colour of a flat dark area comes from the 1/16-resolution average. Luma, the mean
+  // colour and a neighbouring area of another colour and level stay as they were.
+  it('evens out colour blotches in flat darks at a strong lift, keeps luma, the mean colour and the edge', async ctx => {
+    if (await unsupported()) return ctx.skip()
+    const b = await create()
+    const A = [46, 38, 40], B = [34, 41, 42], C = [200, 180, 150]   // A and B: same luma, different colour
+    const pixels = new Uint8ClampedArray(32 * 32 * 4)
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++)
+      pixels.set([...(x >= 16 ? C : ((x >> 3) + (y >> 3)) % 2 ? B : A), 255], (y * 32 + x) * 4)
+    const src = await createImageBitmap(new ImageData(pixels, 32, 32))
+    try {
+      const input = b.ops.DisplayInput(32, 32)
+      input.setSource(src)
+      const guide = b.tensor(1, 1, 4), half = b.tensor(16, 16, 4)
+      const quarter = b.ops.BilinearUpsample(half, { outH: 8, outW: 8 })
+      const eighth = b.ops.BilinearUpsample(quarter.output, { outH: 4, outW: 4 })
+      const sixteenth = b.ops.BilinearUpsample(eighth.output, { outH: 2, outW: 2 })
+      const render = async (wide: boolean) => {
+        runBatched(b, () => input.run({ prepare(sample) {
+          sample(half); quarter.run(); eighth.run(); sixteenth.run()
+          return { half, wide: wide ? sixteenth.output : undefined, guide, gain: 4.9, localGain: 1, red: 1, blue: 1 }
+        } }))
+        return b.readback(input.output)
+      }
+      const before = await render(false), after = await render(true)
+      const px = (v: Float32Array, x: number, y: number) => Array.from(v.slice((y * 32 + x) * 4, (y * 32 + x) * 4 + 3))
+      const luma = (c: number[]) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+      const swing = (v: Float32Array) => Math.abs((px(v, 3, 3)[0] - px(v, 3, 3)[2]) - (px(v, 3, 11)[0] - px(v, 3, 11)[2]))
+      expect(swing(after)).toBeLessThan(0.5 * swing(before))
+      for (const [x, y] of [[3, 3], [3, 11]]) expect(Math.abs(luma(px(after, x, y)) - luma(px(before, x, y)))).toBeLessThan(3 / 255)
+      const meanRB = (v: Float32Array) => { let s = 0; for (let y = 0; y < 16; y++) for (let x = 0; x < 8; x++) { const c = px(v, x, y); s += c[0] - c[2] } return s / 128 }
+      expect(Math.abs(meanRB(after) - meanRB(before))).toBeLessThan(0.15 * Math.abs(meanRB(before)) + 2 / 255)
+      for (const [x, y] of [[17, 5], [20, 20], [16, 12]]) px(after, x, y).forEach((c, i) => expect(c).toBeCloseTo(px(before, x, y)[i], 3))
+    } finally { src.close(); b.destroy() }
+  })
+
   it('normalizes limited and full-range YUV before the linear lift', async ctx => {
     if (await unsupported()) return ctx.skip()
     const b = await create()

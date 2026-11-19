@@ -235,6 +235,9 @@ export interface DisplayLighting {
 export interface LightAdjustment {
   guide: Tensor
   half: Tensor
+  // A coarser average of the same camera sample (1/16 resolution): the reference for
+  // colour noise at the scale of a webcam's chroma blocks (16 px). Absent = half.
+  wide?: Tensor
   gain: number
   localGain: number
   red: number

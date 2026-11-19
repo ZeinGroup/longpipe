@@ -1,8 +1,13 @@
 // Fused into display ingestion (either a texture_external or the 2D fallback).
-struct LightParams { gain: vec4<f32>, dims: vec4<u32> } // guide wh, half wh
+struct LightParams { gain: vec4<f32>, dims: vec4<u32>, wideDims: vec4<u32> } // guide wh, half wh; wide wh
 @group(0) @binding(4) var<uniform> light: LightParams;
 @group(0) @binding(5) var<storage,read> guide: array<Pixel>;
 @group(0) @binding(6) var<storage,read> halfFrame: array<Pixel>;
+@group(0) @binding(7) var<storage,read> wideFrame: array<Pixel>;
+// Colour from the 1/16-resolution average: strength per stop of lift above unity, its cap,
+// and the luma-flatness and colour-agreement gates (encoded units).
+const WIDE_SLOPE: f32 = 0.4; const WIDE_MAX: f32 = 0.95; const WIDE_FLAT_LO: f32 = 0.05; const WIDE_FLAT_HI: f32 = 0.12;
+const WIDE_AGREE_LO: f32 = 0.03; const WIDE_AGREE_HI: f32 = 0.08;
 fn localWeight(uv: vec2<f32>) -> f32 {
     if (light.gain.y == 1.0) { return 0.0; }
     let size = light.dims.xy;
@@ -12,7 +17,7 @@ fn localWeight(uv: vec2<f32>) -> f32 {
     return mix(mix(f32(guide[a.y*size.x+a.x].x),f32(guide[a.y*size.x+b.x].x),f.x),
                      mix(f32(guide[b.y*size.x+a.x].x),f32(guide[b.y*size.x+b.x].x),f.x),f.y);
 }
-// The half-resolution reference, bilinear (a smooth local average, no 2x2 blocks).
+// The half- and 1/16-resolution references, bilinear (smooth local averages, no blocks).
 fn halfSample(uv: vec2<f32>) -> vec3<f32> {
     let size = light.dims.zw;
     let pos = clamp(uv * vec2<f32>(size) - vec2<f32>(0.5),vec2<f32>(0),vec2<f32>(size - vec2<u32>(1)));
@@ -20,6 +25,14 @@ fn halfSample(uv: vec2<f32>) -> vec3<f32> {
     let f = fract(pos);
     return mix(mix(vec3<f32>(halfFrame[a.y*size.x+a.x].rgb),vec3<f32>(halfFrame[a.y*size.x+b.x].rgb),f.x),
                mix(vec3<f32>(halfFrame[b.y*size.x+a.x].rgb),vec3<f32>(halfFrame[b.y*size.x+b.x].rgb),f.x),f.y);
+}
+fn wideSample(uv: vec2<f32>) -> vec3<f32> {
+    let size = light.wideDims.xy;
+    let pos = clamp(uv * vec2<f32>(size) - vec2<f32>(0.5),vec2<f32>(0),vec2<f32>(size - vec2<u32>(1)));
+    let a = vec2<u32>(pos); let b = min(a + vec2<u32>(1), size - vec2<u32>(1));
+    let f = fract(pos);
+    return mix(mix(vec3<f32>(wideFrame[a.y*size.x+a.x].rgb),vec3<f32>(wideFrame[a.y*size.x+b.x].rgb),f.x),
+               mix(vec3<f32>(wideFrame[b.y*size.x+a.x].rgb),vec3<f32>(wideFrame[b.y*size.x+b.x].rgb),f.x),f.y);
 }
 fn correctLighting(src: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
     let weight = localWeight(uv);
@@ -38,7 +51,18 @@ fn correctLighting(src: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
     // (an edge) and everything above the shadows keep full resolution.
     let smoothY = clamp((gain-1.0)*0.3,0.0,0.7)*(1.0-smoothstep(0.02,0.06,abs(dy)))
                 * (1.0-smoothstep(0.12,0.40,y));
-    var c = clamp(src+denoise*chroma+vec3<f32>(smoothY*dy),vec3<f32>(0),vec3<f32>(1));
+    // Webcam colour noise comes in blotches (4:2:0 chroma and its compression blocks, 16 px
+    // at 720p) that a half-resolution average cannot reach. Where the lift is strong, take the
+    // colour of the 1/16-resolution average (a few blocks across) instead, but only where the area is flat in luma
+    // at that scale (no outline, no edge) and its colour agrees with the fine average's
+    // (real colour structure stays). Luma is untouched; the mean colour, so saturation, stays.
+    let wideRgb = wideSample(uv);
+    let dW = wideRgb-src;
+    let dyW = dot(dW,luma);
+    let dc = (halfRgb-vec3<f32>(dot(halfRgb,luma))) - (wideRgb-vec3<f32>(dyW+dot(src,luma)));
+    let wideC = clamp((gain-1.0)*WIDE_SLOPE,0.0,WIDE_MAX)*(1.0-smoothstep(WIDE_FLAT_LO,WIDE_FLAT_HI,abs(dyW)))
+              * (1.0-smoothstep(WIDE_AGREE_LO,WIDE_AGREE_HI,max(abs(dc.r),max(abs(dc.g),abs(dc.b)))));
+    var c = clamp(src+mix(denoise*chroma,dW-vec3<f32>(dyW),wideC)+vec3<f32>(smoothY*dy),vec3<f32>(0),vec3<f32>(1));
     let linear = select(c / vec3<f32>(12.92),pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055),vec3<f32>(2.4)),c>vec3<f32>(0.04045));
     let lift = mix(1.0,gain,smoothstep(0.0004,0.004,dot(linear,luma)));
     let rgb = linear*vec3<f32>(light.gain.z,1,light.gain.w);
