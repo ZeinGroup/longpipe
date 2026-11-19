@@ -191,6 +191,14 @@ export class EfficientNetLiteMattingSmall {
   }
 
   run(): void {
+    this.runFeatures()
+    this.outConv.run()
+    this.alpha.run()
+  }
+
+  // Everything up to featLowRes — what a TierModel wrapper consumes. Skips this
+  // base's own alpha head (outConv + upsample-sigmoid), which nothing reads there.
+  runFeatures(): void {
     this.stem.run()
     this.s0.run()
     this.s1b0.run()
@@ -207,7 +215,5 @@ export class EfficientNetLiteMattingSmall {
     this.dec0.run()
     this.dec1.run()
     this.finalUp.run()
-    this.outConv.run()
-    this.alpha.run()
   }
 }

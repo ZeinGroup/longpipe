@@ -499,9 +499,9 @@ export class Renderer {
 
   // Run the model once. All tiers are static — temporal stability comes from the
   // separate optical-flow path, not recurrent state threaded here.
-  private runModelOnce(): void {
+  private runModelOnce(opts?: { input?: boolean; upscale?: boolean }): void {
     const t = performance.now()
-    this.renderOp.runModel()
+    this.renderOp.runModel(opts)
     // GPU-time sampling: WebGPU only (cheap native promise per sync; WebGL's
     // setTimeout-polling fence is too heavy at per-frame rate). Even on WebGPU,
     // sample 1 in N runs to keep concurrent in-flight syncs bounded.
@@ -525,17 +525,18 @@ export class Renderer {
     let ranModel = false
 
     // Resample the current frame to canvas, then downsample to base for the flow
-    // stem (matches training). runModelOnce re-runs networkInput — cheap + harmless.
+    // stem (matches training). The model below reuses this input (no second pass), and
+    // once warm skips its own upscale: applyAlpha() upscales the stabilized alpha.
     f.networkInput.run()
     f.curBaseDown.run()
 
     if (f.everyFrame) {
       f.net.run(); f.up.run()                                  // before matting → taps are prev's
-      this.runModelOnce(); ranModel = true
+      this.runModelOnce({ input: false, upscale: !f.warm }); ranModel = true
       this.backend.copyTensor(f.curBaseDown.output, f.frameAHeld)  // current = next frame-a
       this.backend.copyTensor(f.tier.output, f.predBuf)
     } else if (this.shouldRunModel()) {                        // skip tier, inference frame
-      this.runModelOnce(); ranModel = true
+      this.runModelOnce({ input: false, upscale: !f.warm }); ranModel = true
       this.backend.copyTensor(f.curBaseDown.output, f.frameAHeld)
       this.backend.copyTensor(f.tier.output, f.alphaHeld!)     // warp source for the coming skips
       this.backend.copyTensor(f.tier.output, f.predBuf)

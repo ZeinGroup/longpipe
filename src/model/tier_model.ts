@@ -15,6 +15,9 @@ export interface BaseNetwork {
   // /2 tap — present only on small-encoder networks (XS tap-half flow head).
   readonly halfTap?: Tensor
   run(): void
+  // Optional: run only up to featLowRes (no standalone alpha head). TierModel
+  // uses it when present.
+  runFeatures?(): void
 }
 export type BaseNetworkCtor = new (backend: Backend, input: Tensor, w: ModelWeights) => BaseNetwork
 
@@ -63,7 +66,10 @@ export class TierModel implements Op {
       wrapperWeights, params,
     )
 
-    this.steps = [...down.steps, base, featUp, ...up.steps]
+    // The base's own alpha head isn't read by the wrapper: skip it when the base
+    // can run features alone.
+    const baseStep = { run: () => (base.runFeatures ? base.runFeatures() : base.run()) }
+    this.steps = [...down.steps, baseStep, featUp, ...up.steps]
     this.output = up.alpha
     this.encoderTaps = base.encoderTaps
     this.halfTap = base.halfTap

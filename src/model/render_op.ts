@@ -308,15 +308,18 @@ export class RenderOp<N extends NetworkLike = NetworkLike> {
   }
 
   // Expensive, runs at preset.modelFps: refresh the alpha tensor.
-  runModel(): void {
+  // `input: false` when the caller already ran the network input this frame;
+  // `upscale: false` when it will replace the alpha (applyAlpha) before display,
+  // which upscales again — the first upscale would be thrown away.
+  runModel(opts: { input?: boolean; upscale?: boolean } = {}): void {
     if (!this.network || !this.networkInput || !this.upscaler) {
       throw new Error('RenderOp.runModel called before attachNetwork')
     }
     const { networkInput, network, upscaler } = this
     runBatched(this.backend, () => {
-      networkInput.run()
+      if (opts.input !== false) networkInput.run()
       network.run()
-      upscaler.run()
+      if (opts.upscale !== false) upscaler.run()
     })
   }
 
