@@ -41,8 +41,8 @@ function write(frame) {
   // Drop instead of queueing: a late frame is worse than a skipped one.
   if (!writer || busy) { frame.close(); return; }
   busy = true;
-  framesOut++;
-  writer.write(frame).then(() => { busy = false; }, () => { busy = false; });
+  // Counted once the generator has taken the frame, not when it is handed over.
+  writer.write(frame).then(() => { busy = false; framesOut++; }, () => { busy = false; });
 }
 
 function stopReader() {
