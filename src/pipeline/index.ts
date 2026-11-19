@@ -88,7 +88,7 @@ export interface PipelineOptions {
   background?:     BackgroundInput
   // Segmentation model. 'longpipe' (default): Longpipe's tiers — all effects,
   // presets/autotune/adaptive. 'mediapipe-selfie': Google's MediaPipe Selfie
-  // Segmenter on the same GPU pipeline — background effects only (touchup,
+  // Segmenter on the same GPU pipeline — backgrounds and lighting (touchup,
   // reframe and non-'auto' presets throw). See pipeline/model_choice.ts.
   model?:          ModelChoice
   preset?:         PresetName | ManualPreset    // default: 'auto' (worker microbenches, picks best fit)
@@ -127,6 +127,8 @@ export interface PipelineOptions {
   // (capped at 30), so a 15 fps camera isn't treated as overload.
   // Default: true.
   adaptive?:       boolean
+  // Automatic lighting correction. Off by default. Works with any background.
+  lighting?:       boolean
   // Face touch-up (UV-space skin smoothing). Presence enables it; runs in
   // PARALLEL with any background effect (one shared encoder pass; the
   // retouched frame feeds the background compositor). Requires tier weights
@@ -350,6 +352,7 @@ async function fetchTouchupAssets(baseUrl: string, dtype: Dtype): Promise<Touchu
 // Settings the app asked for. Replayed onto a restarted worker so recovery
 // resumes exactly where the pipeline was.
 interface DesiredState {
+  lighting:   boolean
   background: BackgroundInput
   enabled:    boolean
   touchup:    TouchupOptions | null
@@ -569,6 +572,7 @@ export class Pipeline implements PromiseLike<Pipeline> {
     this.desired = {
       background: opts.background,
       enabled:    opts.enabled,
+      lighting:   options.lighting ?? false,
       touchup:    options.touchup ?? null,
       reframe:    options.reframe ?? null,
     }
@@ -683,6 +687,7 @@ export class Pipeline implements PromiseLike<Pipeline> {
         preset,
         background:  norm.background,
         enabled:     this.desired.enabled,
+        lighting:    this.desired.lighting,
         backend:     (this.attemptBackend = TUNING.forceBackend ?? workerBackend(this.opts.backend, this.preferBackend)),
         dtype:       this.opts.dtype ?? 'f16',
         canvasSize:  this.outputSize,
@@ -1191,6 +1196,14 @@ export class Pipeline implements PromiseLike<Pipeline> {
       const previousCleanup = this.bgCleanup
       this.bgCleanup = norm.cleanup ?? null
       previousCleanup?.()
+    })
+  }
+
+  // Toggle automatic lighting on the current output track.
+  setLighting(on: boolean): Promise<void> {
+    return this.control('setLighting', async controller => {
+      await controller.sendMessage('setLighting', on)
+      this.desired.lighting = on
     })
   }
 

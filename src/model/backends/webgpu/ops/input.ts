@@ -1,4 +1,5 @@
-import type { ImageSource, InputOp, Dtype } from "~/model/backend.ts";
+import lightingSrc from "../shaders/lighting_input.wgsl";
+import type { DisplayLighting, LightAdjustment, ImageSource, InputOp, Dtype } from "~/model/backend.ts";
 import type { WebGPUBackend } from "~/model/backends/webgpu/index.ts";
 import type { WebGPUTensor } from "~/model/backends/webgpu/base_webgpu_op.ts";
 import input2dF32Src        from "~/model/backends/webgpu/shaders/input_2d.wgsl";
@@ -22,20 +23,20 @@ export class InputWebGPU implements InputOp {
   private readonly device: GPUDevice;
   private readonly dtype: Dtype;
   private readonly sampler: GPUSampler;
-  private readonly uniformBuffer: GPUBuffer;
-  private readonly dispatch: [number, number, number];
+  private readonly params = new WeakMap<WebGPUTensor, { buffer: GPUBuffer; orientation: Orientation | null }>();
+  private lightParams?: GPUBuffer;
+  private lit2d?: GPUComputePipeline;
+  private litExternal?: GPUComputePipeline;
 
   // Lazily-compiled pipelines and the staging texture for the 2D path.
-  private pipeline2d:        GPUComputePipeline | null = null;
+  private readonly pipeline2d: GPUComputePipeline;
   private pipelineExternal:  GPUComputePipeline | null = null;
   private stagingTex:        GPUTexture | null = null;
   private stagingW = 0;
   private stagingH = 0;
 
   private source: ImageSource | null = null;
-  private readonly outW: number;
-  private readonly outH: number;
-  // Orientation currently in the uniform buffer (null = identity).
+  // Display transform for the next camera sample (null = identity).
   private orientation: Orientation | null = null;
 
   constructor(backend: WebGPUBackend, h: number, w: number) {
@@ -51,16 +52,6 @@ export class InputWebGPU implements InputOp {
       addressModeV: "clamp-to-edge",
     });
 
-    this.uniformBuffer = this.device.createBuffer({
-      size: 48, // out_w u32 + out_h u32 + 8 padding + uv_x vec4 + uv_y vec4
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    this.outW = w;
-    this.outH = h;
-    this.writeParams(null);
-
-    this.dispatch = [Math.ceil(w / 8), Math.ceil(h / 8), 1];
-
     // Pre-compile the 2D pipeline since it's the common static path; the
     // external-texture pipeline is built on demand the first time a
     // VideoFrame source is set (avoids paying the cost when callers only ever
@@ -75,86 +66,89 @@ export class InputWebGPU implements InputOp {
   // Applied in the sampling shader; omitted = identity.
   setSource(src: ImageSource, orientation?: Orientation | null): void {
     this.source = src;
-    if (!sameOrientation(orientation, this.orientation)) this.writeParams(orientation ?? null);
+    this.orientation = orientation ?? null;
   }
 
   // The uniform write is queue-timeline, ahead of the (batched) dispatch that
   // reads it, and only happens when the orientation changes.
-  private writeParams(o: Orientation | null): void {
+  private paramsFor(out: WebGPUTensor): GPUBuffer {
+    const entry = this.params.get(out);
+    if (entry && sameOrientation(entry.orientation, this.orientation)) return entry.buffer;
+    const buffer = entry?.buffer ?? this.device.createBuffer({
+      size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
     const ab = new ArrayBuffer(48);
-    new Uint32Array(ab, 0, 2).set([this.outW, this.outH]);
-    const m = orientationUvMatrix(o);
+    new Uint32Array(ab, 0, 2).set([out.w, out.h]);
+    const m = orientationUvMatrix(this.orientation);
     new Float32Array(ab, 16, 8).set([m[0], m[1], m[2], 0, m[3], m[4], m[5], 0]);
-    this.device.queue.writeBuffer(this.uniformBuffer, 0, ab);
-    this.orientation = o;
-  }
-
-  run(): void {
-    if (!this.source) throw new Error("InputWebGPU.run() called before setSource()");
-
-    if (IS_VIDEO_FRAME(this.source)) {
-      if (!this.externalUnsupported) {
-        try {
-          this.runExternal(this.source);
-          return;
-        } catch (err) {
-          // Some WebGPU implementations (e.g. Firefox, where external textures
-          // are behind a pref) reject importExternalTexture. Fall back to the
-          // copy path for the rest of this op's life.
-          this.externalUnsupported = true;
-          console.warn("[longpipe] importExternalTexture unavailable, using copyExternalImageToTexture:", (err as Error)?.message ?? err);
-        }
-      }
-      this.run2d(this.source);
-    } else {
-      this.run2d(this.source);
-    }
+    this.device.queue.writeBuffer(buffer, 0, ab);
+    this.params.set(out, { buffer, orientation: this.orientation });
+    return buffer;
   }
 
   private externalUnsupported = false;
 
-  private run2d(src: ImageBitmap | VideoFrame): void {
-    const w = IS_VIDEO_FRAME(src) ? src.displayWidth : src.width;
-    const h = IS_VIDEO_FRAME(src) ? src.displayHeight : src.height;
-    this.ensureStagingTexture(w, h);
-    // Queue-timeline copy: submit any batched work first so it stays ordered
-    // (earlier recorded passes may still read the staging texture).
-    this.backend.flush();
-    this.device.queue.copyExternalImageToTexture(
-      { source: src, flipY: false },
-      { texture: this.stagingTex! },
-      [w, h],
-    );
-    const bindGroup = this.device.createBindGroup({
-      layout: this.pipeline2d!.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: this.stagingTex!.createView() },
-        { binding: 1, resource: this.sampler },
-        { binding: 2, resource: { buffer: this.uniformBuffer } },
-        { binding: 3, resource: { buffer: this.output.buffer } },
-      ],
-    });
-    this.dispatchOnce(this.pipeline2d!, bindGroup);
+  run(lighting?: DisplayLighting): void {
+    const src = this.source;
+    if (!src) throw new Error("InputWebGPU.run() called before setSource()");
+    let external: GPUExternalTexture | undefined;
+    if (IS_VIDEO_FRAME(src) && !this.externalUnsupported) {
+      try {
+        external = this.device.importExternalTexture({ source: src, colorSpace: "srgb" });
+      } catch (err) {
+        this.externalUnsupported = true;
+        console.warn("[longpipe] external texture unavailable; using copy path:", err);
+      }
+    }
+    let resource: GPUExternalTexture | GPUTextureView;
+    if (external) {
+      resource = external;
+    } else {
+      const w = IS_VIDEO_FRAME(src) ? src.displayWidth : src.width;
+      const h = IS_VIDEO_FRAME(src) ? src.displayHeight : src.height;
+      this.ensureStagingTexture(w, h);
+      this.backend.flush();
+      this.device.queue.copyExternalImageToTexture(
+        { source: src, flipY: false }, { texture: this.stagingTex!, colorSpace: "srgb" }, [w, h],
+      );
+      resource = this.stagingTex!.createView();
+    }
+    const sample = (out: WebGPUTensor, light?: LightAdjustment | null) => {
+      const pipeline = this.pipelineFor(!!external, !!light);
+      const entries: GPUBindGroupEntry[] = [
+        { binding: 0, resource }, { binding: 1, resource: this.sampler },
+        { binding: 2, resource: { buffer: this.paramsFor(out) } },
+        { binding: 3, resource: { buffer: out.buffer } },
+      ];
+      if (light) {
+        this.lightParams ??= this.device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+        const ab = new ArrayBuffer(32);
+        new Float32Array(ab, 0, 4).set([light.gain, light.localGain, light.red, light.blue]);
+        new Uint32Array(ab, 16).set([light.guide.w,light.guide.h,light.half.w,light.half.h]);
+        this.device.queue.writeBuffer(this.lightParams, 0, ab);
+        entries.push({ binding: 4, resource: { buffer: this.lightParams } },
+          { binding: 5, resource: { buffer: (light.guide as WebGPUTensor).buffer } },
+          { binding: 6, resource: { buffer: (light.half as WebGPUTensor).buffer } });
+      }
+      const group = this.device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries });
+      this.dispatchOnce(pipeline, group, [Math.ceil(out.w/8),Math.ceil(out.h/8),1]);
+    };
+    const light = lighting?.prepare(out => sample(out as WebGPUTensor));
+    sample(this.output, light);
   }
 
-  private runExternal(src: VideoFrame): void {
-    if (typeof this.device.importExternalTexture !== "function") throw new Error("importExternalTexture not supported");
-    if (!this.pipelineExternal) {
-      this.pipelineExternal = this.buildPipeline(
-        this.dtype === "f16" ? inputExternalF16Src : inputExternalF32Src,
-      );
+  private pipelineFor(external: boolean, lit: boolean): GPUComputePipeline {
+    const source = external
+      ? (this.dtype === "f16" ? inputExternalF16Src : inputExternalF32Src)
+      : (this.dtype === "f16" ? input2dF16Src : input2dF32Src);
+    if (!lit) {
+      if (!external) return this.pipeline2d;
+      return this.pipelineExternal ??= this.buildPipeline(source);
     }
-    const externalTex = this.device.importExternalTexture({ source: src });
-    const bindGroup = this.device.createBindGroup({
-      layout: this.pipelineExternal.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: externalTex },
-        { binding: 1, resource: this.sampler },
-        { binding: 2, resource: { buffer: this.uniformBuffer } },
-        { binding: 3, resource: { buffer: this.output.buffer } },
-      ],
-    });
-    this.dispatchOnce(this.pipelineExternal, bindGroup);
+    const key = external ? "litExternal" : "lit2d";
+    return this[key] ??= this.buildPipeline(source.replace("// DISPLAY_LIGHTING",
+      "rgba = vec4<f32>(correctLighting(rgba.rgb, out_uv.xy), rgba.a);")
+      + `\nalias Pixel = vec4<${this.dtype}>;\n` + lightingSrc);
   }
 
   private ensureStagingTexture(w: number, h: number): void {
@@ -180,19 +174,19 @@ export class InputWebGPU implements InputOp {
     });
   }
 
-  private dispatchOnce(pipeline: GPUComputePipeline, bindGroup: GPUBindGroup): void {
+  private dispatchOnce(pipeline: GPUComputePipeline, bindGroup: GPUBindGroup, dispatch: [number,number,number]): void {
     const shared = this.backend.computePass();   // inside backend.batch()
     if (shared) {
       shared.setPipeline(pipeline);
       shared.setBindGroup(0, bindGroup);
-      shared.dispatchWorkgroups(...this.dispatch);
+      shared.dispatchWorkgroups(...dispatch);
       return;
     }
     const enc  = this.device.createCommandEncoder();
     const pass = enc.beginComputePass();
     pass.setPipeline(pipeline);
     pass.setBindGroup(0, bindGroup);
-    pass.dispatchWorkgroups(...this.dispatch);
+    pass.dispatchWorkgroups(...dispatch);
     pass.end();
     this.device.queue.submit([enc.finish()]);
   }

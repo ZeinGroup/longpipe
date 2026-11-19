@@ -120,6 +120,7 @@ async function handleCommand(cmd: CmdName, data: unknown): Promise<unknown> {
     case 'attachPreview': return handleAttachPreview(data as CmdDataMap['attachPreview'])
     case 'setPreview':    return handleSetPreview(data as CmdDataMap['setPreview'])
     case 'clearPreview':  return handleClearPreview()
+    case 'setLighting':   return requireRenderer('setLighting').setLighting(data as boolean)
     case 'setTouchup':    return handleSetTouchup(data as CmdDataMap['setTouchup'])
     case 'setReframe':    return handleSetReframe(data as CmdDataMap['setReframe'])
     case 'reframeNow':    return handleReframeNow()
@@ -292,6 +293,7 @@ async function handleInit(data: InitData): Promise<InitResponse> {
     canvas:      setup.canvas,
     background:  data.background,
     enabled:     data.enabled,
+    lighting:    data.lighting,
     topology:    data.topology,
   })
 
@@ -405,6 +407,7 @@ async function handleSetInput(data: CmdDataMap['setInput']): Promise<void> {
   stopInputPipe()
   // Wait for the old pipe to release the sink's lock before piping again.
   await prev?.catch(() => {})
+  renderer?.resetLighting()
   startInputPipe(input, outputSink)
 }
 

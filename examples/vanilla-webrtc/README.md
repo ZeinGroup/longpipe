@@ -17,7 +17,7 @@ WebRTC (two peer connections with in-page signaling, plus the few RTP stats wort
 What it shows:
 
 - **Processed tracks in a real `RTCPeerConnection`**: the remote `<video>` is what pc2 decoded.
-- **Controls**: background none / blur / image / solid colour (live `setBackground`), audio denoise
+- **Controls**: background none / blur / image / solid colour (live `setBackground`), automatic lighting (live `setLighting`), audio denoise
   on/off (live `setDenoise`), and backend auto / prefer WebGPU / force WebGL2 / none (a new
   pipeline, with the tracks swapped on the existing senders via `replaceTrack`).
 - **Model**: `auto` (benchmark the device, then the adaptive controller moves between tiers), a
