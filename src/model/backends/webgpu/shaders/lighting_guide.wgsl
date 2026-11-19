@@ -44,5 +44,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                        disk((uv-(lm.xy+rm.xy)*0.5)* grid / vec2<f32>(span),vec2<f32>(0),0.5));
     let face = conf*max(cheeks,forehead)*(1.0-excluded);
     let broad = conf*(1.0-smoothstep(0.42,1.22,length(p-vec2<f32>(0,0.28))));
-    guide[gid.y*dims.z+gid.x] = Pixel(vec4<f32>(person*(0.65+0.35*broad),person,person*face,0));
+    guide[gid.y*dims.z+gid.x] = Pixel(vec4<f32>(person*(0.85+0.15*broad),person,person*face,0));
 }

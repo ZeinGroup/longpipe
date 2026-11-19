@@ -42,11 +42,9 @@ function trimmedMean(tiles: Float32Array, group: number, fallback: number) {
 // person, who ends near mid grey (0.186 linear).
 export const SUBJECT_TARGET = 0.18   // linear luminance of the subject after the curve
 // The fill inside the person aims its interior reading higher than the global target.
-// Measured on the night scene (the dim room as the reference saw it): the fill
-// reaches its cap there (+0.5 EV, the face all of it, the body 65% through the
-// guide), and the person's region lands at 0.168 linear (code 114), against the
-// reference's 0.186 (code 119): the remaining gap is the guide's body share, not
-// this target.
+// On the night scene (the dim room as the reference saw it) the fill reaches its cap
+// (+0.5 EV, the face all of it, the body 85% through the guide); with a 65% body
+// share the person's region stopped at code 114 against the reference's 119.
 export const LOCAL_TARGET = 0.24
 export const GLOBAL_MAX = 1.8        // stops, the whole picture
 export const LOCAL_MAX = 0.5         // stops, inside the person only
