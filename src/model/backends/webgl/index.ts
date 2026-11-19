@@ -1,3 +1,4 @@
+import { DisplayInputWebGL } from '~/model/backends/webgl/ops/display_input.ts'
 import { LightingWebGL } from './ops/lighting'
 import type { Backend, Dtype, DataView_, RenderTarget } from '~/model/backend.ts'
 import type { WebGLTensor, WebGLMLBuffer } from '~/model/backends/webgl/base_webgl_op.ts'
@@ -71,9 +72,6 @@ export class WebGLBackend implements Backend {
     readonly canvas: HTMLCanvasElement | OffscreenCanvas,
     readonly dtype: Dtype,
   ) {
-    // The display shader decodes full-range sRGB after the browser's video
-    // matrix/range conversion. This is also WebGL's default unpack space.
-    if ('unpackColorSpace' in gl) gl.unpackColorSpace = 'srgb'
     this.fbo = gl.createFramebuffer()!
     this.textureFormat = dtype === 'f16'
       ? { internalFormat: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT, bytesPerElement: 2 }
@@ -118,6 +116,7 @@ export class WebGLBackend implements Backend {
       UpsampleConv1x1:  (input, weights, params)         => new UpsampleConv1x1WebGL(this, input, weights, params),
       UpsampleSigmoid:  (input, params)                  => new UpsampleSigmoidWebGL(this, input, params),
       Input:            (h, w)                           => new InputWebGL(this, h, w),
+      DisplayInput:     (h, w)                           => new DisplayInputWebGL(this, h, w),
     }
     this.presenters = {
       // WebGL writes to the implicit default framebuffer — the op binds it

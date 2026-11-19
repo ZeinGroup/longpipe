@@ -245,6 +245,11 @@ export interface InputOp {
   // `orientation`: display transform (rotation, flip) the source still needs,
   // applied while sampling so `output` is upright. Omitted = identity.
   setSource(src: ImageSource, orientation?: Orientation | null): void;
+  run(): void;
+}
+// The display Input: run(lighting) applies automatic lighting while sampling;
+// run() with no hook is exactly the upstream Input op's pass.
+export interface DisplayInputOp extends InputOp {
   run(lighting?: DisplayLighting): void;
 }
 
@@ -383,6 +388,7 @@ export interface Backend {
 
     // Image source ingestion. Bilinear-resamples the source down to (h, w, 4).
     Input:           (h: number, w: number) => InputOp;
+    DisplayInput:    (h: number, w: number) => DisplayInputOp;
   };
 
   // Render-to-display ops. Produce no Tensor — write directly to a canvas.

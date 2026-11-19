@@ -71,7 +71,7 @@ describe.each(BACKENDS_DTYPE)('automatic lighting ($name)', ({ name, create }) =
     }
     const src = await createImageBitmap(new ImageData(pixels, 8, 8))
     try {
-      const input = b.ops.Input(8, 8)
+      const input = b.ops.DisplayInput(8, 8)
       input.setSource(src)
       const guide = b.tensor(1, 1, 4)
       const render = async (size: number) => {
@@ -93,7 +93,7 @@ describe.each(BACKENDS_DTYPE)('automatic lighting ($name)', ({ name, create }) =
   it('normalizes limited and full-range YUV before the linear lift', async ctx => {
     if (await unsupported()) return ctx.skip()
     const b = await create()
-    const input = b.ops.Input(8, 8), half = b.tensor(4, 4, 4), guide = b.tensor(1, 1, 4)
+    const input = b.ops.DisplayInput(8, 8), half = b.tensor(4, 4, 4), guide = b.tensor(1, 1, 4)
     try {
       const levels: number[] = []
       for (const fullRange of [true, false]) {
@@ -121,6 +121,30 @@ describe.each(BACKENDS_DTYPE)('automatic lighting ($name)', ({ name, create }) =
     } finally { b.destroy() }
   })
 
+  // With lighting off the display Input must be the plain Input's pass (WebKit, which
+  // nobody here can test, runs exactly what npm ships): same output, bit for bit,
+  // through a resample and a turn, for an ImageBitmap and a VideoFrame.
+  it.for(['bitmap', 'frame'])('with lighting off, the display input is the plain input pass (%s)', async (kind, ctx) => {
+    if (await unsupported()) return ctx.skip()
+    const b = await create()
+    const pixels = new Uint8ClampedArray(16 * 8 * 4)
+    for (let i = 0; i < 16 * 8; i++) pixels.set([(i * 37) % 256, (i * 11) % 256, (i * 73) % 256, 255], i * 4)
+    const bmp = await createImageBitmap(new ImageData(pixels, 16, 8))
+    const src = kind === 'frame' ? new VideoFrame(bmp, { timestamp: 0 }) : bmp
+    try {
+      for (const orientation of [null, { rotation: 90, flip: true }] as const) {
+        const plain = b.ops.Input(6, 12), display = b.ops.DisplayInput(6, 12)
+        plain.setSource(src, orientation as never); display.setSource(src, orientation as never)
+        runBatched(b, () => { plain.run(); display.run() })
+        expect(Array.from(await b.readback(display.output))).toEqual(Array.from(await b.readback(plain.output)))
+      }
+    } finally {
+      if (src !== bmp) src.close()
+      bmp.close()
+      b.destroy()
+    }
+  })
+
   it.for(['bitmap', 'frame'])('keeps raw samples independent of the fused %s display correction', async (kind, ctx) => {
     if (await unsupported()) return ctx.skip()
     const b = await create()
@@ -129,7 +153,7 @@ describe.each(BACKENDS_DTYPE)('automatic lighting ($name)', ({ name, create }) =
     const bmp = await createImageBitmap(new ImageData(pixels, 8, 8))
     const src = kind === 'frame' ? new VideoFrame(bmp, { timestamp: 0 }) : bmp
     try {
-      const input = b.ops.Input(8, 8), raw = b.tensor(4, 4, 4)
+      const input = b.ops.DisplayInput(8, 8), raw = b.tensor(4, 4, 4)
       const guide = b.tensor(1, 1, 4, new Float32Array([1, 1, 1, 0]))
       input.setSource(src)
       runBatched(b, () => input.run({

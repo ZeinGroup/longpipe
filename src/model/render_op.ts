@@ -1,4 +1,4 @@
-import { runBatched, type Backend, type DisplayLighting, type Tensor, type InputOp, type ImageSource, type RenderTarget } from '~/model/backend.ts'
+import { runBatched, type Backend, type DisplayLighting, type DisplayInputOp, type Tensor, type InputOp, type ImageSource, type RenderTarget } from '~/model/backend.ts'
 import type { Orientation } from '~/model/orientation.ts'
 import { BilinearUpscaler } from '~/model/effects/upscale_bilinear.ts'
 import { BicubicUpscaler  } from '~/model/effects/upscale_bicubic.ts'
@@ -61,7 +61,7 @@ interface CompositorHandle { run(): void }
 // take effect on attach.
 export class RenderOp<N extends NetworkLike = NetworkLike> {
   // Always built — passthrough path only needs these.
-  private readonly displayInput: InputOp
+  private readonly displayInput: DisplayInputOp
   private readonly image:        Tensor
 
   // Network-dependent pieces. Null until attachNetwork().
@@ -113,7 +113,7 @@ export class RenderOp<N extends NetworkLike = NetworkLike> {
 
   constructor(private readonly backend: Backend) {
     const canvas = backend.canvas
-    this.displayInput = backend.ops.Input(canvas.height, canvas.width)
+    this.displayInput = backend.ops.DisplayInput(canvas.height, canvas.width)
     this.image        = this.displayInput.output
   }
 

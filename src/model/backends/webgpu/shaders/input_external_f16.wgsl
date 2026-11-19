@@ -30,7 +30,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         1.0,
     );
     let uv = vec2<f32>(dot(params.uv_x.xyz, out_uv), dot(params.uv_y.xyz, out_uv));
-    var rgba = textureSampleBaseClampToEdge(src_tex, src_sampler, uv);
-    // DISPLAY_LIGHTING
+    let rgba = textureSampleBaseClampToEdge(src_tex, src_sampler, uv);
     output_buf[y * params.out_w + x] = vec4<f16>(rgba);
 }

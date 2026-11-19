@@ -1,3 +1,4 @@
+import { DisplayInputWebGPU } from "~/model/backends/webgpu/ops/display_input.ts";
 import { LightingWebGPU } from './ops/lighting'
 import type { Backend, Dtype, DataView_, RenderTarget } from "~/model/backend.ts";
 import type { WebGPUTensor, WebGPUMLBuffer } from "~/model/backends/webgpu/base_webgpu_op.ts";
@@ -119,6 +120,7 @@ export class WebGPUBackend implements Backend {
       UpsampleConv1x1:  (input, weights, params)        => new UpsampleConv1x1WebGPU(this, input, weights, params),
       UpsampleSigmoid:  (input, params)                 => new UpsampleSigmoidWebGPU(this, input, params),
       Input:            (h, w)                          => new InputWebGPU(this, h, w),
+      DisplayInput:     (h, w)                          => new DisplayInputWebGPU(this, h, w),
     };
 
     this.presenters = {
