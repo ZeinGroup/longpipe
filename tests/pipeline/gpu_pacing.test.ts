@@ -3,9 +3,9 @@ import { Pipeline } from '~/pipeline/index'
 import { TUNING } from '~/pipeline/tuning'
 import { stubWeights, restoreFetch, SMALL, sleep } from '../helpers/pipeline'
 
-// GPU pacing on the outputs without consumer backpressure (bitmap-shuttle,
-// transfer-capture): with a GPU slower than the camera, the output must stay
-// close to real time (stale input frames drop) instead of falling further
+// GPU pacing on every output (bitmap-shuttle, transfer-capture and, on
+// Chromium, the MediaStreamTrackGenerator path): with a GPU slower than the
+// camera, the output must stay close to real time (stale input frames drop) instead of falling further
 // behind. A heavy output size on headless Chromium's software GPU stands in for
 // a slow device. (Measured 2026-11: headless Chromium/SwiftShader and Firefox/
 // llvmpipe don't queue much even without pacing, as their software GL blocks on
@@ -87,12 +87,16 @@ const CASES = [
   { output: 'bitmap-shuttle',   backend: 'webgl'  },
   { output: 'bitmap-shuttle',   backend: 'webgpu' },
   { output: 'transfer-capture', backend: 'webgl'  },
+  // Chromium's own path (MediaStreamTrackProcessor in, MediaStreamTrackGenerator out).
+  { output: 'mstg',             backend: 'webgl'  },
+  { output: 'mstg',             backend: 'webgpu' },
 ] as const
 
 describe.each(CASES)('GPU pacing ($output, $backend)', ({ output, backend }) => {
   const firefox = navigator.userAgent.includes('Firefox')
-  it.skipIf(firefox && output === 'transfer-capture')('latency stays bounded when the GPU is slower than the camera', async () => {
-    TUNING.forceTopology = { input: 'rvfc-postmessage', output }
+  const noMstg = output === 'mstg' && !('MediaStreamTrackGenerator' in self)
+  it.skipIf((firefox && output === 'transfer-capture') || noMstg)('latency stays bounded when the GPU is slower than the camera', async () => {
+    TUNING.forceTopology = { input: output === 'mstg' ? 'mstp' : 'rvfc-postmessage', output }
     TUNING.forceBackend  = backend
     // A cheap camera, a heavy output: the GPU (not the camera) is the bottleneck.
     const W = 2560
@@ -109,6 +113,9 @@ describe.each(CASES)('GPU pacing ($output, $backend)', ({ output, backend }) => 
       `age median ${median(early).toFixed(0)} ms (s1-4) → ${median(late).toFixed(0)} ms (s8-11), ` +
       `max ${Math.max(...late).toFixed(0)} ms, frames ${early.length}/${late.length}`)
     expect(late.length).toBeGreaterThan(5)
+    // Honest: the pipeline's fps (what the adaptive controller acts on) must not
+    // claim many more frames than actually reach the output track.
+    expect(stats.fps).toBeLessThan(late.length / 3 * 1.5 + 3)
     // Pacing must not starve the output (e.g. a fence that never reads as signalled).
     expect(stats.fps).toBeGreaterThan(stats.inputFps * 0.5)
     // Bounded: doesn't grow over time, and stays well under a second.
