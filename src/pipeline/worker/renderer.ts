@@ -528,18 +528,21 @@ export class Renderer {
     let ranModel = false
 
     // Resample the current frame to canvas, then downsample to base for the flow
-    // stem (matches training). The model below reuses this input (no second pass), and
-    // once warm skips its own upscale: applyAlpha() upscales the stabilized alpha.
+    // stem (matches training). With a matte option set, the model below reuses this
+    // input (no second pass) and, once warm, skips its own upscale: applyAlpha()
+    // upscales the stabilized alpha. Without one, upstream's exact pass sequence
+    // (runModelOnce re-runs networkInput and upscales), on browsers we cannot test.
     f.networkInput.run()
     f.curBaseDown.run()
+    const lean = this.matteTuned ? { input: false, upscale: !f.warm } : undefined
 
     if (f.everyFrame) {
       f.net.run(); f.up.run()                                  // before matting → taps are prev's
-      this.runModelOnce({ input: false, upscale: !f.warm }); ranModel = true
+      this.runModelOnce(lean); ranModel = true
       this.backend.copyTensor(f.curBaseDown.output, f.frameAHeld)  // current = next frame-a
       this.backend.copyTensor(f.tier.output, f.predBuf)
     } else if (this.shouldRunModel()) {                        // skip tier, inference frame
-      this.runModelOnce({ input: false, upscale: !f.warm }); ranModel = true
+      this.runModelOnce(lean); ranModel = true
       this.backend.copyTensor(f.curBaseDown.output, f.frameAHeld)
       this.backend.copyTensor(f.tier.output, f.alphaHeld!)     // warp source for the coming skips
       this.backend.copyTensor(f.tier.output, f.predBuf)
@@ -787,6 +790,7 @@ export class Renderer {
 
     const tier = new TierModel(
       this.backend, networkInput.output, w.base, w.wrapper, cfg.wrapper, cfg.base,
+      { featuresOnly: this.matteTuned },
     )
 
     this.renderOp.attachNetwork(tier, networkInput, {
@@ -1047,6 +1051,13 @@ export class Renderer {
         return { mode: 'image', image: input.output }
       }
     }
+  }
+
+  // Any display-matte option set. Without one the frame path is upstream's pass
+  // for pass (the fork adds nothing to it on a browser we cannot test).
+  private get matteTuned(): boolean {
+    const m = this.matte
+    return !!(m.ramp || m.maskedBlur || m.refine || m.changeGate)
   }
 
   // RenderOp options that shape the display alpha (MatteOptions.ramp).
