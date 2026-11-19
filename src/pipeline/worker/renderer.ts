@@ -730,9 +730,10 @@ export class Renderer {
     this.resetLighting()
     this.lightingEnabled = on
     // Lighting meters cheeks and forehead from the face head's keypoints: build
-    // (or drop) the detection half of the face chain with it, unless touch-up
-    // or reframe already keeps one.
-    if (this.preset && !this.faceCfg && !this.reframeCfg) this.buildFaceChain()
+    // the detection half of the face chain the first time it is needed. It is
+    // kept when lighting goes off (it then simply doesn't run): rebuilding on
+    // every toggle would upload the face head and its tensors again each time.
+    if (on && this.preset && !this.faceChain) this.buildFaceChain()
   }
 
   setEnabled(on: boolean): void {
