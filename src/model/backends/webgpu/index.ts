@@ -18,6 +18,8 @@ import { LandmarkOverlayWebGPU } from "~/model/backends/webgpu/ops/landmark_over
 import { FaceTouchupWebGPU, FaceTouchupStageWebGPU } from "~/model/backends/webgpu/ops/face_touchup.ts";
 import { StabilizeWebGPU } from "~/model/backends/webgpu/ops/stabilize.ts";
 import { AlphaRampWebGPU } from "~/model/backends/webgpu/ops/alpha_ramp.ts";
+import { MaskBackgroundWebGPU } from "~/model/backends/webgpu/ops/mask_background.ts";
+import { UnpremultiplyWebGPU } from "~/model/backends/webgpu/ops/unpremultiply.ts";
 import { GuidedPackWebGPU } from "~/model/backends/webgpu/ops/guided_pack.ts";
 import { BoxFilterWebGPU } from "~/model/backends/webgpu/ops/box_filter.ts";
 import { GuidedCoeffsWebGPU } from "~/model/backends/webgpu/ops/guided_coeffs.ts";
@@ -103,6 +105,8 @@ export class WebGPUBackend implements Backend {
       FaceTouchupStage: (frame, landmarks, box, topo, params) => new FaceTouchupStageWebGPU(this, frame, landmarks, box, topo, params),
       Stabilize:        (flow, pred, ref, envPrev, params) => new StabilizeWebGPU(this, flow, pred, ref, envPrev, params),
       AlphaRamp:        (alpha, params)                 => new AlphaRampWebGPU(this, alpha, params),
+      MaskBackground:   (image, alpha)                  => new MaskBackgroundWebGPU(this, image, alpha),
+      Unpremultiply:    (input)                         => new UnpremultiplyWebGPU(this, input),
       GuidedPack:       (guide, alpha)                  => new GuidedPackWebGPU(this, guide, alpha),
       BoxFilter:        (input, params)                 => new BoxFilterWebGPU(this, input, params),
       GuidedCoeffs:     (input, params)                 => new GuidedCoeffsWebGPU(this, input, params),

@@ -18,6 +18,8 @@ import { LandmarkOverlayWebGL } from '~/model/backends/webgl/ops/landmark_overla
 import { FaceTouchupWebGL, FaceTouchupStageWebGL } from '~/model/backends/webgl/ops/face_touchup.ts'
 import { StabilizeWebGL } from '~/model/backends/webgl/ops/stabilize.ts'
 import { AlphaRampWebGL } from '~/model/backends/webgl/ops/alpha_ramp.ts'
+import { MaskBackgroundWebGL } from '~/model/backends/webgl/ops/mask_background.ts'
+import { UnpremultiplyWebGL } from '~/model/backends/webgl/ops/unpremultiply.ts'
 import { GuidedPackWebGL } from '~/model/backends/webgl/ops/guided_pack.ts'
 import { BoxFilterWebGL } from '~/model/backends/webgl/ops/box_filter.ts'
 import { GuidedCoeffsWebGL } from '~/model/backends/webgl/ops/guided_coeffs.ts'
@@ -99,6 +101,8 @@ export class WebGLBackend implements Backend {
       FaceTouchupStage: (frame, landmarks, box, topo, params) => new FaceTouchupStageWebGL(this, frame, landmarks, box, topo, params),
       Stabilize:        (flow, pred, ref, envPrev, params) => new StabilizeWebGL(this, flow, pred, ref, envPrev, params),
       AlphaRamp:        (alpha, params)                 => new AlphaRampWebGL(this, alpha, params),
+      MaskBackground:   (image, alpha)                  => new MaskBackgroundWebGL(this, image, alpha),
+      Unpremultiply:    (input)                         => new UnpremultiplyWebGL(this, input),
       GuidedPack:       (guide, alpha)                  => new GuidedPackWebGL(this, guide, alpha),
       BoxFilter:        (input, params)                 => new BoxFilterWebGL(this, input, params),
       GuidedCoeffs:     (input, params)                 => new GuidedCoeffsWebGL(this, input, params),

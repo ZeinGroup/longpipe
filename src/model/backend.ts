@@ -359,6 +359,10 @@ export interface Backend {
     // Display-side matte ops (elementwise, 4-channel, same shape in and out).
     // AlphaRamp: smoothstep(lo, hi, alpha.x) — a tighter blend edge.
     AlphaRamp:       (alpha: Tensor, params: AlphaRampParams) => Op;
+    // MaskBackground + Unpremultiply: a blur of the background alone (normalized
+    // convolution): (rgb·(1−a), 1−a) through the pyramid, then rgb / a.
+    MaskBackground:  (image: Tensor, alpha: Tensor) => Op;
+    Unpremultiply:   (input: Tensor) => Op;
     // Guided upsampler (fast guided filter): coefficients at the model's grid from
     // the guide (the camera frame there) and the matte, boxed, then applied with
     // the full-resolution camera luminance. GuidedApply's output is the display

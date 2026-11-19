@@ -14,7 +14,9 @@ export type UpscalerMode = 'bilinear' | 'bicubic' | 'guided'
 export type BackgroundConfig =
   | { mode: 'solid'; color: [number, number, number] }
   | { mode: 'image'; image: Tensor }
-  | { mode: 'blur';  sigma: number }
+  // masked: blur the background alone (normalized convolution by 1 − alpha), so
+  // the subject's colours don't smear into the blurred room around it.
+  | { mode: 'blur';  sigma: number; masked?: boolean }
 
 // What compositeTo() can render: an effect (BackgroundConfig), raw passthrough
 // (input image straight to the target — disabled/boot), or fg-passthrough (the
@@ -395,7 +397,7 @@ export class RenderOp<N extends NetworkLike = NetworkLike> {
     switch (spec.mode) {
       case 'solid': return new CompositorSolid(backend, fg, alpha, spec.color, target)
       case 'image': return new CompositorImage(backend, fg, alpha, spec.image, target)
-      case 'blur':  return new CompositorBlur(backend,  fg, alpha, spec.sigma, target)
+      case 'blur':  return new CompositorBlur(backend,  fg, alpha, spec.sigma, target, spec.masked ?? false)
     }
   }
 }
@@ -413,7 +415,7 @@ function sameSpec(a: CompositeSpec, b: CompositeSpec): boolean {
       const ac = (a as { color: [number, number, number] }).color
       return ac[0] === b.color[0] && ac[1] === b.color[1] && ac[2] === b.color[2]
     }
-    case 'blur':  return (a as { sigma: number }).sigma === b.sigma
+    case 'blur':  return (a as { sigma: number }).sigma === b.sigma && !!(a as { masked?: boolean }).masked === !!b.masked
     case 'image': return (a as { image: Tensor }).image === b.image
   }
 }
