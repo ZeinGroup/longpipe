@@ -282,9 +282,13 @@ export class WebGLBackend implements Backend {
       fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)
       if (!fence) throw new Error('lighting meter: cannot create fence')
       gl.flush()
-      const deadline = performance.now() + 1000
-      for (;;) {
-        await new Promise(r => setTimeout(r, 8))
+      // Nothing waits on this but the meter (the frame path never does), so a busy
+      // GPU only delays the next reading: allow it several seconds, polling more
+      // slowly as it goes, before giving up on this one sample.
+      const deadline = performance.now() + 5000
+      for (let delay = 8; ; delay = Math.min(64, delay * 2)) {
+        await new Promise(r => setTimeout(r, delay))
+        if (gl.isContextLost()) throw new Error('lighting meter: context lost')
         const status = gl.clientWaitSync(fence, 0, 0)
         if (status === gl.ALREADY_SIGNALED || status === gl.CONDITION_SATISFIED) break
         if (status === gl.WAIT_FAILED || performance.now() > deadline) throw new Error('lighting meter: fence unavailable')
